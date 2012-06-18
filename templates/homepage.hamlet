@@ -1,5 +1,10 @@
 <h1>_{MsgHello}
 
+<p>
+  Feel free to visit the #
+  <a href=@{DropBoxR SubRootR}>subsite
+  \ as well.
+
 <ol>
   <li>Now that you have a working project you should use the #
     \<a href="http://www.yesodweb.com/book/">Yesod book</a> to learn more. #
@@ -36,3 +41,13 @@
   <li> And last but not least, Testing. In <em>tests/main.hs</em> you will find a #
     test suite that performs tests on this page. #
     You can run your tests by doing: <pre>yesod test</pre>
+
+  <li> ^{dbtestWidget}
+
+  <p>Your current auth ID: #{show maid}
+  $maybe _ <- maid
+      <p>
+          <a href=@{AuthR LogoutR}>Logout
+  $nothing
+      <p>
+          <a href=@{AuthR LoginR}>Go to the login page

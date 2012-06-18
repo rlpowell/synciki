@@ -49,7 +49,7 @@ makeFoundation conf setLogger = do
               Database.Persist.Store.applyEnv
     p <- Database.Persist.Store.createPoolConfig (dbconf :: Settings.PersistConfig)
     Database.Persist.Store.runPool dbconf (runMigration migrateAll) p
-    return $ App conf setLogger s p manager dbconf
+    return $ App conf setLogger s p manager dbconf DropBox
 
 -- for yesod devel
 getApplicationDev :: IO (Int, Application)
