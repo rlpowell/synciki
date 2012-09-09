@@ -13,6 +13,18 @@ import qualified Data.ByteString.Lazy.Char8 as LC
 
 import Text.Regex.PCRE.Rex
 
+newtype Title = Title String
+  deriving (Show, Read, Eq)
+
+instance PathPiece Natural where
+    toPathPiece (Natural i) = T.pack $ show i
+    fromPathPiece s =
+        case reads $ T.unpack s of
+            (i, ""):_
+                | i < 1 -> Nothing
+                | otherwise -> Just $ Natural i
+            [] -> Nothing
+
 -- Turn a list of url/file basename pairs into a widget
 pageListPairsToWidget :: [(String, String)] -> GWidget sub master ()
 pageListPairsToWidget pairs = toWidget [hamlet|
