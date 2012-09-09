@@ -1,9 +1,0 @@
-<h1>_{MsgDbLogin}
-
-  <p>Your current auth ID: #{show mdbid}
-  $maybe _ <- mdbid
-      <p>
-          <a href=@{DropBoxLogoutR}>Logout
-  $nothing
-      <p>
-          <a href=@{DropBoxLoginR}>Go to the login page
