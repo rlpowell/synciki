@@ -127,7 +127,7 @@ getComponentById pid = getOne . getEQ pid . components <$> ask
 
 -- | get a component by its path
 getComponentByPath :: ComponentPath -> Query CtrlVState (Maybe Component)
-getComponentByPath path = getOne . getEQ componentPath . components <$> ask
+getComponentByPath path = getOne . getEQ path . components <$> ask
 
 type Limit  = Int
 type Offset = Int
@@ -315,7 +315,7 @@ viewRecentPage acid =
     where
       mkTableRow Component{..} =
           <tr>
-           <td><a href=(ViewComponentById componentId)><% show $ unComponentId componentId %></a></td>
+           <td><a href=(ViewComponentById componentId)><% componentId %></a></td>
            <td><a href=(ViewComponentById componentId)><% title       %></a></td>
            <td><a href=(ViewComponentByPath componentPath)><% show $ unComponentPath componentPath %></a></td>
            <td><% added       %></td>
