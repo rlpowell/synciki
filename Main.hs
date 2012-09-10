@@ -38,6 +38,10 @@ newtype ComponentId = ComponentId { unComponentId :: Integer }
     deriving (Eq, Ord, Read, Show, Enum, Data, Typeable, SafeCopy)
 $(derivePathInfo ''ComponentId)
 
+newtype ComponentPath = ComponentPath { unComponentPath :: Text }
+    deriving (Eq, Ord, Read, Show, Data, Typeable, SafeCopy)
+$(derivePathInfo ''ComponentPath)
+
 -- | The format of the paste. Currently we only support plain-text,
 -- but later we might add support for Haskell syntax hightlighting,
 -- etc.
@@ -48,13 +52,12 @@ $(deriveSafeCopy 0 'base ''Format)
 
 -- | the component configuration
 data Component = Component
-    { componentId  :: ComponentId
-    , title    :: Text
-    , nickname :: Text
-    , format   :: Format
-    , added    :: UTCTime
-    , userId   :: UserId
-    , url      :: Text
+    { componentId   :: ComponentId
+    , title         :: Text
+    , componentPath :: ComponentPath
+    , added         :: UTCTime
+    , userId        :: UserId
+    , url           :: Text
     }
     deriving (Eq, Ord, Read, Show, Data, Typeable)
 $(deriveSafeCopy 0 'base ''Component)
@@ -117,9 +120,13 @@ insertComponent p@Component{..}
            put $ cvs { components = IxSet.updateIx componentId p components }
            return componentId
 
--- | get a paste by it's 'PasteId'
+-- | get a component by its id
 getComponentById :: ComponentId -> Query CtrlVState (Maybe Component)
 getComponentById pid = getOne . getEQ pid . components <$> ask
+
+-- | get a component by its path
+getComponentByPath :: ComponentPath -> Query CtrlVState (Maybe Component)
+getComponentByPath path = getOne . getEQ componentPath . components <$> ask
 
 type Limit  = Int
 type Offset = Int
@@ -137,6 +144,7 @@ getRecentComponents limit offset =
 $(makeAcidic ''CtrlVState
    [ 'getComponentById
    , 'getRecentComponents
+   , 'getComponentByPath
    , 'insertComponent
    , 'deleteComponent
    ])
@@ -148,7 +156,8 @@ $(makeAcidic ''CtrlVState
 -- | All the routes for our web application
 data Route
     = ViewRecent
-    | ViewComponent ComponentId
+    | ViewComponentById ComponentId
+    | ViewComponentByPath ComponentPath
     | NewComponent
     | DeleteComponentPage ComponentId
     | CSS
@@ -290,9 +299,8 @@ viewRecentPage acid =
                    <tr>
                     <th>id</th>
                     <th>title</th>
-                    <th>author</th>
+                    <th>path</th>
                     <th>date</th>
-                    <th>format</th>
                     <th>url</th>
                     <th>userid</th>
                     <th>delete?</th>
@@ -306,35 +314,42 @@ viewRecentPage acid =
     where
       mkTableRow Component{..} =
           <tr>
-           <td><a href=(ViewComponent componentId)><% show $ unComponentId componentId %></a></td>
-           <td><a href=(ViewComponent componentId)><% title       %></a></td>
-           <td><% nickname    %></td>
-           <td><% added      %></td>
-           <td><% show format %></td>
-           <td><% url %></td>
+           <td><a href=(ViewComponentById componentId)><% show $ unComponentId componentId %></a></td>
+           <td><a href=(ViewComponentById componentId)><% title       %></a></td>
+           <td><a href=(ViewComponentByPath componentPath)><% show $ unComponentPath componentPath %></a></td>
+           <td><% added       %></td>
+           <td><% url         %></td>
            <td><% show $ unUserId userId %></td>
            <td><a href=(DeleteComponentPage componentId)>Delete</a></td>
           </tr>
 
+viewComponentPageByPath :: Acid -> ComponentPath -> CtrlV Response
+viewComponentPageByPath acid path =
+    do mComponent <- query (GetComponentByPath path)
+       viewComponentPage acid mComponent "Component path <% path %> could not be found."
+
+viewComponentPageById :: Acid -> ComponentId -> CtrlV Response
+viewComponentPageById acid cid =
+    do mComponent <- query (GetComponentById cid)
+       viewComponentPage acid mComponent "Component id <% cid %> could not be found."
+
 -- | page handler for 'ViewComponent'
-viewComponentPage :: Acid -> ComponentId -> CtrlV Response
-viewComponentPage acid pid =
+viewComponentPage :: Acid -> Maybe Component -> Text -> CtrlV Response
+viewComponentPage acid mComponent failed =
     do method GET
-       mComponent <- query (GetComponentById pid)
        case mComponent of
          Nothing ->
              do notFound ()
                 appTemplate acid "Component not found." () $
-                    <p>Component <% pid %> could not be found.</p>
-         -- (Just (Paste (PasteMeta{..}) component)) ->
+                    <p><% failed %></p>
          (Just component@Component{..}) ->
              do ok ()
-                appTemplate acid ("Component " ++ (show $ unComponentId pid)) () $
+                appTemplate acid ("Component " ++ (show $ unComponentId componentId)) () $
                     <div class="component">
                      <dl class="component-header">
-                      <dt>Component:</dt><dd><a href=(ViewComponent pid)><% pid %></a></dd>
+                      <dt>Component:</dt><dd><a href=(ViewComponentById componentId)><% componentId %></a></dd>
                       <dt>Title:</dt><dd><% title %></dd>
-                      <dt>Author:</dt><dd><% nickname %></dd>
+                      <dt>Path:</dt><dd><% show $ unComponentPath componentPath %></dd>
                       <dt>UserId:</dt><dd><% show $ unUserId userId %></dd>
                       <dt>URL:</dt><dd><% url %></dd>
                      </dl>
@@ -395,7 +410,7 @@ newComponentPage acid@Acid{..} =
       success :: Component -> CtrlV Response
       success component =
           do pid <- update (InsertComponent component)
-             seeOtherURL (ViewComponent pid)
+             seeOtherURL (ViewComponentById pid)
 
 -- | the 'Form' used for entering a new paste
 componentForm :: UserId -> CtrlVForm Component
@@ -403,7 +418,7 @@ componentForm userId =
     (fieldset $
        ul $
           (,,,) <$> (li $ label <span>title</span>  ++> (inputText "" `transformEither` required) <++ errorList)
-                <*> (li $ label <span>nick</span>   ++> (inputText "" `transformEither` required) <++ errorList)
+                <*> (li $ label <span>path</span>   ++> (inputText "" `transformEither` required) <++ errorList)
                 <*> (li $ label <span>format</span> ++> formatForm)
                 <*> (li $ label <span>url</span>    ++> errorList ++> (inputText "http://" `transformEither` required))
                 <* inputSubmit "add component"
@@ -411,13 +426,12 @@ componentForm userId =
     where
       formatForm =
           select [(a, show a) | a <- [minBound .. maxBound]] (== PlainText)
-      toComponent (ttl, nick, fmt, url) =
+      toComponent (ttl, path, fmt, url) =
           do now <- liftIO getCurrentTime
              return $ Right $
                         (Component { componentId  = ComponentId 0
                                    , title    = ttl
-                                   , nickname = nick
-                                   , format   = fmt
+                                   , componentPath     = ComponentPath path
                                    , added    = now
                                    , userId   = userId
                                    , url      = url
@@ -469,7 +483,8 @@ route acid@Acid{..} baseURL url =
           do vr <- showURL ViewRecent
              XMLGenT $ nestURL U_AuthProfile $ handleAuthProfile acidAuth acidProfile (appTemplate' acid) Nothing (Just baseURL) vr authProfileURL
       ViewRecent      -> viewRecentPage acid
-      (ViewComponent pid) -> viewComponentPage acid pid
+      (ViewComponentById pid) -> viewComponentPageById acid pid
+      (ViewComponentByPath path) -> viewComponentPageByPath acid path
       NewComponent        -> newComponentPage acid
       CSS             -> serveFile (asContentType "text/css") "style.css"
       (DeleteComponentPage cid) -> deleteComponentPage acid cid

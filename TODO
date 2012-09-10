@@ -1,3 +1,6 @@
 - turn the view recent page into the my components page, only show
   components for this userid
-- global uniqueness checks for the nick
+- global uniqueness checks for the path, and make sure it doesn't
+  have any /
+- domain field?
+- field for type of component ; public/private dropbox/google docs
