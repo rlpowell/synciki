@@ -69,6 +69,7 @@ instance Indexable Component where
     empty =
         ixSet [ ixFun $ (:[]) . componentId
               , ixFun $ (:[]) . added
+              , ixFun $ (:[]) . componentPath
               , ixFun $ (:[]) . Main.userId
               ]
 
