@@ -276,7 +276,7 @@ instance EmbedAsChild CtrlV' ComponentId where
     asChild (ComponentId id) = asChild ('#' : show id)
 
 instance EmbedAsChild CtrlV' ComponentPath where
-    asChild (ComponentPath path) = asChild (show path)
+    asChild (ComponentPath path) = asChild path
 
 -- | This makes it easy to embed a timestamp into an HSP
 -- template. 'show' provides way too much precision, so something
