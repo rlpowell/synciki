@@ -327,12 +327,12 @@ viewRecentPage acid =
 viewComponentPageByPath :: Acid -> ComponentPath -> CtrlV Response
 viewComponentPageByPath acid path =
     do mComponent <- query (GetComponentByPath path)
-       viewComponentPage acid mComponent "Component path <% path %> could not be found."
+       viewComponentPage acid mComponent $ "Component path " <> (unComponentPath path) <> "could not be found."
 
 viewComponentPageById :: Acid -> ComponentId -> CtrlV Response
 viewComponentPageById acid cid =
     do mComponent <- query (GetComponentById cid)
-       viewComponentPage acid mComponent "Component id <% cid %> could not be found."
+       viewComponentPage acid mComponent $ "Component id " <> (Text.pack $ show $ unComponentId cid) <> "could not be found."
 
 -- | page handler for 'ViewComponent'
 viewComponentPage :: Acid -> Maybe Component -> Text -> CtrlV Response
