@@ -273,7 +273,10 @@ appTemplate acid ttl moreHdrs bdy = liftM toResponse (XMLGenT $ baseAppTemplate 
 
 -- | This makes it easy to embed a PasteId in an HSP template
 instance EmbedAsChild CtrlV' ComponentId where
-    asChild (ComponentId i) = asChild ('#' : show i)
+    asChild (ComponentId id) = asChild ('#' : show id)
+
+instance EmbedAsChild CtrlV' ComponentPath where
+    asChild (ComponentPath path) = asChild (show path)
 
 -- | This makes it easy to embed a timestamp into an HSP
 -- template. 'show' provides way too much precision, so something
@@ -317,22 +320,26 @@ viewRecentPage acid =
           <tr>
            <td><a href=(ViewComponentById componentId)><% componentId %></a></td>
            <td><a href=(ViewComponentById componentId)><% title       %></a></td>
-           <td><a href=(ViewComponentByPath componentPath)><% show $ unComponentPath componentPath %></a></td>
+           <td><a href=(ViewComponentByPath componentPath)><% componentPath %></a></td>
            <td><% added       %></td>
            <td><% url         %></td>
            <td><% show $ unUserId userId %></td>
            <td><a href=(DeleteComponentPage componentId)>Delete</a></td>
           </tr>
 
+-- | tiny helper function
+cIdToText :: ComponentId -> Text
+cIdToText cId = Text.pack $ show $ unComponentId cId
+
 viewComponentPageByPath :: Acid -> ComponentPath -> CtrlV Response
 viewComponentPageByPath acid path =
     do mComponent <- query (GetComponentByPath path)
-       viewComponentPage acid mComponent $ "Component path " <> (unComponentPath path) <> "could not be found."
+       viewComponentPage acid mComponent $ "Component path " <> (unComponentPath path) <> " could not be found."
 
 viewComponentPageById :: Acid -> ComponentId -> CtrlV Response
 viewComponentPageById acid cid =
     do mComponent <- query (GetComponentById cid)
-       viewComponentPage acid mComponent $ "Component id " <> (Text.pack $ show $ unComponentId cid) <> "could not be found."
+       viewComponentPage acid mComponent $ "Component id " <> (cIdToText cid) <> " could not be found."
 
 -- | page handler for 'ViewComponent'
 viewComponentPage :: Acid -> Maybe Component -> Text -> CtrlV Response
@@ -345,12 +352,12 @@ viewComponentPage acid mComponent failed =
                     <p><% failed %></p>
          (Just component@Component{..}) ->
              do ok ()
-                appTemplate acid ("Component " ++ (show $ unComponentId componentId)) () $
+                appTemplate acid ("Component " ++ (Text.unpack $ cIdToText componentId)) () $
                     <div class="component">
                      <dl class="component-header">
                       <dt>Component:</dt><dd><a href=(ViewComponentById componentId)><% componentId %></a></dd>
                       <dt>Title:</dt><dd><% title %></dd>
-                      <dt>Path:</dt><dd><% show $ unComponentPath componentPath %></dd>
+                      <dt>Path:</dt><dd><% componentPath %></dd>
                       <dt>UserId:</dt><dd><% show $ unUserId userId %></dd>
                       <dt>URL:</dt><dd><% url %></dd>
                      </dl>
@@ -380,7 +387,7 @@ deleteComponentPage acid@Acid{..} cId =
             else
               appTemplate acid "Delete a Component" () $
                 <%>
-                  <h1>Invalid Component ID <% show $ unComponentId cId %></h1>
+                  <h1>Invalid Component ID <% cId %></h1>
                 </%>
     where
       delete :: ComponentId -> CtrlV Response
