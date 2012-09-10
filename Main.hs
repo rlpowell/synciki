@@ -163,6 +163,7 @@ data Route
     | DeleteComponentPage ComponentId
     | CSS
     | U_AuthProfile AuthProfileURL
+    | ViewPath ComponentPath
       deriving (Eq, Ord, Read, Show, Data, Typeable)
 
 -- | we will just use template haskell to derive the route mapping
@@ -324,12 +325,29 @@ viewRecentPage acid =
            <td><% added       %></td>
            <td><% url         %></td>
            <td><% show $ unUserId userId %></td>
+           <td><a href=(ViewPath componentPath)>View Path</a></td>
            <td><a href=(DeleteComponentPage componentId)>Delete</a></td>
           </tr>
 
 -- | tiny helper function
 cIdToText :: ComponentId -> Text
 cIdToText cId = Text.pack $ show $ unComponentId cId
+
+viewPath :: Acid -> ComponentPath -> CtrlV Response
+viewPath acid path =
+    do mComponent <- query (GetComponentByPath path)
+       case mComponent of
+         Nothing ->
+             do notFound ()
+                appTemplate acid "Path not found." () $
+                    <p>Path <% path %> could not be found.</p>
+         (Just component@Component{..}) ->
+             do ok ()
+                appTemplate acid ("Path " ++ (Text.unpack $ unComponentPath path)) () $
+                  <div class="pathContents">
+                    <p>Path <% path %> has url <% url %></p>
+                  </div>
+
 
 viewComponentPageByPath :: Acid -> ComponentPath -> CtrlV Response
 viewComponentPageByPath acid path =
@@ -493,6 +511,7 @@ route acid@Acid{..} baseURL url =
       ViewRecent      -> viewRecentPage acid
       (ViewComponentById pid) -> viewComponentPageById acid pid
       (ViewComponentByPath path) -> viewComponentPageByPath acid path
+      (ViewPath path) -> viewPath acid path
       NewComponent        -> newComponentPage acid
       CSS             -> serveFile (asContentType "text/css") "style.css"
       (DeleteComponentPage cid) -> deleteComponentPage acid cid
