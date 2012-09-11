@@ -173,6 +173,7 @@ data Route
     | CSS
     | U_AuthProfile AuthProfileURL
     | ViewPath ComponentPath
+    | ViewPathPage ComponentId String String
       deriving (Eq, Ord, Read, Show, Data, Typeable)
 
 -- | we will just use template haskell to derive the route mapping
@@ -354,8 +355,8 @@ css tag = HXT.multi (HXT.hasName tag)
 -- http://adit.io/posts/2012-03-10-building_a_concurrent_web_scraper_with_haskell.html ,
 -- with modifications to use http-conduit
 webPageGet :: String -> IO (HXT.IOSArrow HXT.XmlTree (NTree HXT.XNode))
-webPageGet url = do
-  contents <- NHC.simpleHttp url
+webPageGet pageUrl = do
+  contents <- NHC.simpleHttp pageUrl
   return $ HXT.readString [HXT.withParseHTML HXT.yes, HXT.withWarnings HXT.no] (LC.unpack contents)
 
 -- Takes a URL and returns a Just pair of the original and just the part between the last / and the extension, IFF the extension is .txt (otherwise Nothing)
@@ -365,8 +366,8 @@ fullFilePair = [rex|^(?{ }.*/(?{ }[^/.]+)\.txt)$|]
 -- Given a dropbox public URL, pull all the hrefs, turn them into
 -- url/file basename pairs, and turn those into a widget
 dropBoxPathList :: String -> IO [(String, String)]
-dropBoxPathList url = do
-  page <- liftIO $ webPageGet url
+dropBoxPathList pageUrl = do
+  page <- liftIO $ webPageGet pageUrl
   -- Most of this next line is from
   -- http://adit.io/posts/2012-03-10-building_a_concurrent_web_scraper_with_haskell.html
   hrefs <- HXT.runX $ page
@@ -389,14 +390,32 @@ viewPath acid cPath =
                   <div class="pathContents">
                     <p>Path <% cPath %> has url <% url %></p>
                     <ul>
-                    <% mapM showEntry entries %>
+                    <% mapM (showEntry componentId) entries %>
                     </ul>
                   </div>
     where 
-      showEntry entry = 
+      showEntry cId entry = 
         <li>
-         <a href=((fst entry) ++ "?dl=1")><% snd entry %></a>
+         <a href=(ViewPathPage cId ((fst entry) ++ "?dl=1") (snd entry))><% snd entry %></a>
         </li>
+
+renderPage :: EmbedAsChild m String => String -> XMLGenT m (XMLType m)
+renderPage pageUrl =
+  <p>some stuff</p>
+
+viewPathPage :: Acid -> ComponentId -> String -> String -> CtrlV Response
+viewPathPage acid cId pageUrl name =
+  do mComponent <- query (GetComponentById cId)
+     case mComponent of
+        Nothing ->
+          do notFound ()
+             appTemplate acid "Id not found." () $
+                <p>Component ID <% cId %> could not be found.</p>
+        (Just component@Component{..}) ->
+          do pageHtml <- renderPage pageUrl
+             appTemplate acid ("Page " ++ name ++ " in section " ++ (Text.unpack $ unComponentPath componentPath)) () pageHtml
+
+
 
 -- END dropbox stuff
 
@@ -564,6 +583,7 @@ route acid@Acid{..} baseURL url =
       (ViewComponentById cId) -> viewComponentPageById acid cId
       (ViewComponentByPath cPath) -> viewComponentPageByPath acid cPath
       (ViewPath cPath) -> viewPath acid cPath
+      (ViewPathPage cId pageUrl name) -> viewPathPage acid cId pageUrl name
       NewComponent        -> newComponentPage acid
       CSS             -> serveFile (asContentType "text/css") "style.css"
       (DeleteComponentPage cid) -> deleteComponentPage acid cid
