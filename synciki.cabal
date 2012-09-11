@@ -17,16 +17,16 @@ Executable ControlV
   Build-Depends:     base < 5
                      , happstack-foundation == 0.1.*
                      , happstack-authenticate
-                     , ixset == 1.0.*
-                     , time == 1.4.*
-                     , text == 0.11.*
-                     , hsp == 0.7.*
-                     , hsx == 0.10.*
-                     , blaze-html == 0.5.*
-                     , happstack-hsp == 7.1.*
-                     , filepath == 1.3.*
-                     , acid-state == 0.6.*
-                     , http-conduit == 1.4.*
-                     , hxt == 9.2.*
-                     , bytestring == 0.9.*
-                     , rex == 0.3.*
+                     , ixset
+                     , time
+                     , text
+                     , hsp
+                     , hsx
+                     , blaze-html
+                     , happstack-hsp
+                     , filepath
+                     , acid-state
+                     , http-conduit
+                     , hxt
+                     , bytestring
+                     , rex
