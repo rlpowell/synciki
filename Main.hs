@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveDataTypeable, FlexibleContexts, FlexibleInstances, GeneralizedNewtypeDeriving, MultiParamTypeClasses, OverloadedStrings, RecordWildCards, TemplateHaskell, TypeFamilies, TypeSynonymInstances, OverloadedStrings #-}
+{-# LANGUAGE DeriveDataTypeable, FlexibleContexts, FlexibleInstances, GeneralizedNewtypeDeriving, MultiParamTypeClasses, OverloadedStrings, RecordWildCards, TemplateHaskell, TypeFamilies, TypeSynonymInstances, OverloadedStrings, QuasiQuotes, ViewPatterns #-}
 {-# OPTIONS_GHC -F -pgmFtrhsx #-}
 module Main where
 
@@ -24,6 +24,15 @@ import qualified Happstack.Server.HSP.HTML as HTML
 import Text.Blaze.Html                        (Html)
 import Text.Blaze.Html.Renderer.String         (renderHtml)
 import qualified HSX.XMLGenerator as HSX
+
+-- Pulling remote web pages
+import qualified Network.HTTP.Conduit as NHC
+import qualified Text.XML.HXT.Core as HXT
+import Data.Tree.NTree.TypeDefs
+import qualified Data.ByteString.Lazy.Char8 as LC
+import Text.Regex.PCRE.Rex -- also needs TemplateHaskell, QuasiQuotes, ViewPatterns
+import Data.List
+
 
 ------------------------------------------------------------------------------
 -- Model
@@ -123,11 +132,11 @@ insertComponent p@Component{..}
 
 -- | get a component by its id
 getComponentById :: ComponentId -> Query CtrlVState (Maybe Component)
-getComponentById pid = getOne . getEQ pid . components <$> ask
+getComponentById cId = getOne . getEQ cId . components <$> ask
 
 -- | get a component by its path
 getComponentByPath :: ComponentPath -> Query CtrlVState (Maybe Component)
-getComponentByPath path = getOne . getEQ path . components <$> ask
+getComponentByPath cPath = getOne . getEQ cPath . components <$> ask
 
 type Limit  = Int
 type Offset = Int
@@ -274,10 +283,10 @@ appTemplate acid ttl moreHdrs bdy = liftM toResponse (XMLGenT $ baseAppTemplate 
 
 -- | This makes it easy to embed a PasteId in an HSP template
 instance EmbedAsChild CtrlV' ComponentId where
-    asChild (ComponentId id) = asChild ('#' : show id)
+    asChild (ComponentId cId) = asChild ('#' : show cId)
 
 instance EmbedAsChild CtrlV' ComponentPath where
-    asChild (ComponentPath path) = asChild path
+    asChild (ComponentPath cPath) = asChild cPath
 
 -- | This makes it easy to embed a timestamp into an HSP
 -- template. 'show' provides way too much precision, so something
@@ -308,6 +317,7 @@ viewRecentPage acid =
                     <th>date</th>
                     <th>url</th>
                     <th>userid</th>
+                    <th>view</th>
                     <th>delete?</th>
                    </tr>
                   </thead>
@@ -333,26 +343,67 @@ viewRecentPage acid =
 cIdToText :: ComponentId -> Text
 cIdToText cId = Text.pack $ show $ unComponentId cId
 
+-- BEGIN dropbox stuff
+
+-- Accessory function stolen from
+-- http://adit.io/posts/2012-03-10-building_a_concurrent_web_scraper_with_haskell.html
+css :: HXT.ArrowXml a => String -> a HXT.XmlTree HXT.XmlTree
+css tag = HXT.multi (HXT.hasName tag)
+
+-- Accessory function stolen from
+-- http://adit.io/posts/2012-03-10-building_a_concurrent_web_scraper_with_haskell.html ,
+-- with modifications to use http-conduit
+webPageGet :: String -> IO (HXT.IOSArrow HXT.XmlTree (NTree HXT.XNode))
+webPageGet url = do
+  contents <- NHC.simpleHttp url
+  return $ HXT.readString [HXT.withParseHTML HXT.yes, HXT.withWarnings HXT.no] (LC.unpack contents)
+
+-- Takes a URL and returns a Just pair of the original and just the part between the last / and the extension, IFF the extension is .txt (otherwise Nothing)
+fullFilePair :: String -> Maybe (String, String)
+fullFilePair = [rex|^(?{ }.*/(?{ }[^/.]+)\.txt)$|]
+
+-- Given a dropbox public URL, pull all the hrefs, turn them into
+-- url/file basename pairs, and turn those into a widget
+dropBoxPathList :: String -> IO [(String, String)]
+dropBoxPathList url = do
+  page <- liftIO $ webPageGet url
+  -- Most of this next line is from
+  -- http://adit.io/posts/2012-03-10-building_a_concurrent_web_scraper_with_haskell.html
+  hrefs <- HXT.runX $ page
+                  HXT.>>> css "a" 
+                  HXT.>>> HXT.getAttrValue "href"
+  return $ nub $ catMaybes $ map fullFilePair hrefs
+
 viewPath :: Acid -> ComponentPath -> CtrlV Response
-viewPath acid path =
-    do mComponent <- query (GetComponentByPath path)
+viewPath acid cPath =
+    do mComponent <- query (GetComponentByPath cPath)
        case mComponent of
          Nothing ->
              do notFound ()
                 appTemplate acid "Path not found." () $
-                    <p>Path <% path %> could not be found.</p>
+                    <p>Path <% cPath %> could not be found.</p>
          (Just component@Component{..}) ->
-             do ok ()
-                appTemplate acid ("Path " ++ (Text.unpack $ unComponentPath path)) () $
+             do entries <- liftIO $ dropBoxPathList $ Text.unpack url
+                ok ()
+                appTemplate acid ("Path " ++ (Text.unpack $ unComponentPath cPath)) () $
                   <div class="pathContents">
-                    <p>Path <% path %> has url <% url %></p>
+                    <p>Path <% cPath %> has url <% url %></p>
+                    <ul>
+                    <% mapM showEntry entries %>
+                    </ul>
                   </div>
+    where 
+      showEntry entry = 
+        <li>
+         <a href=((fst entry) ++ "?dl=1")><% snd entry %></a>
+        </li>
 
+-- END dropbox stuff
 
 viewComponentPageByPath :: Acid -> ComponentPath -> CtrlV Response
-viewComponentPageByPath acid path =
-    do mComponent <- query (GetComponentByPath path)
-       viewComponentPage acid mComponent $ "Component path " <> (unComponentPath path) <> " could not be found."
+viewComponentPageByPath acid cPath =
+    do mComponent <- query (GetComponentByPath cPath)
+       viewComponentPage acid mComponent $ "Component path " <> (unComponentPath cPath) <> " could not be found."
 
 viewComponentPageById :: Acid -> ComponentId -> CtrlV Response
 viewComponentPageById acid cid =
@@ -400,19 +451,20 @@ deleteComponentPage acid@Acid{..} cId =
                 <h1>You Are Not Logged In</h1>
               </%>
           (Just uid) ->
+            -- FIXME: Make sure the uid matches!
             if unComponentId cId > 0 then
-              delete cId
+              deleteC cId
             else
               appTemplate acid "Delete a Component" () $
                 <%>
                   <h1>Invalid Component ID <% cId %></h1>
                 </%>
     where
-      delete :: ComponentId -> CtrlV Response
-      delete cId =
+      deleteC :: ComponentId -> CtrlV Response
+      deleteC toDeleteId =
           -- FIXME: Do something if the retval is false, I guess?
           -- Shouldn't ever happen, though.
-          do retval <- update (DeleteComponent cId)
+          do retval <- update (DeleteComponent toDeleteId)
              seeOtherURL ViewRecent
 
 -- | page handler for 'NewComponent'
@@ -435,8 +487,8 @@ newComponentPage acid@Acid{..} =
     where
       success :: Component -> CtrlV Response
       success component =
-          do pid <- update (InsertComponent component)
-             seeOtherURL (ViewComponentById pid)
+          do cId <- update (InsertComponent component)
+             seeOtherURL (ViewComponentById cId)
 
 -- | the 'Form' used for entering a new paste
 componentForm :: UserId -> CtrlVForm Component
@@ -452,12 +504,12 @@ componentForm userId =
     where
       formatForm =
           select [(a, show a) | a <- [minBound .. maxBound]] (== PlainText)
-      toComponent (ttl, path, fmt, url) =
+      toComponent (ttl, cPath, fmt, url) =
           do now <- liftIO getCurrentTime
              return $ Right $
                         (Component { componentId  = ComponentId 0
                                    , title    = ttl
-                                   , componentPath     = ComponentPath path
+                                   , componentPath     = ComponentPath cPath
                                    , added    = now
                                    , userId   = userId
                                    , url      = url
@@ -509,9 +561,9 @@ route acid@Acid{..} baseURL url =
           do vr <- showURL ViewRecent
              XMLGenT $ nestURL U_AuthProfile $ handleAuthProfile acidAuth acidProfile (appTemplate' acid) Nothing (Just baseURL) vr authProfileURL
       ViewRecent      -> viewRecentPage acid
-      (ViewComponentById pid) -> viewComponentPageById acid pid
-      (ViewComponentByPath path) -> viewComponentPageByPath acid path
-      (ViewPath path) -> viewPath acid path
+      (ViewComponentById cId) -> viewComponentPageById acid cId
+      (ViewComponentByPath cPath) -> viewComponentPageByPath acid cPath
+      (ViewPath cPath) -> viewPath acid cPath
       NewComponent        -> newComponentPage acid
       CSS             -> serveFile (asContentType "text/css") "style.css"
       (DeleteComponentPage cid) -> deleteComponentPage acid cid
