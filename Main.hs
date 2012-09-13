@@ -11,6 +11,11 @@ import Data.Time.Clock (UTCTime, getCurrentTime)
 import Data.Maybe
 import HSP
 
+-- If we start doing complicated URL manipulation, this would be
+-- valuable, but I think String (or re-branded String) is fine for now.
+--
+-- import Network.URL
+
 -- Added for auth
 import Happstack.Auth
 import Happstack.Auth.Core.Auth
@@ -59,6 +64,43 @@ data Format
       deriving (Eq, Ord, Read, Show, Enum, Bounded, Data, Typeable)
 $(deriveSafeCopy 0 'base ''Format)
 
+newtype MyURL = MyURL { unMyURL :: Text }
+    deriving (Eq, Ord, Read, Show, Data, Typeable, SafeCopy)
+
+----------------------
+-- Component Files
+----------------------
+-- Each component is trolled for a list of files it contains, and
+-- then various data about them is cached.
+
+-- | The type used to search on/for/index component files; a
+-- component path and a name uniquely identify a file, but only in
+-- combination together.
+data ComponentFileIndex = ComponentFileIndex
+  { cfi_componentPath :: ComponentPath
+  , cfi_name          :: Text
+  }
+  deriving (Eq, Ord, Read, Show, Data, Typeable)
+$(deriveSafeCopy 0 'base ''ComponentFileIndex)
+
+-- | Maps synciki's view of a component file (ComponentFileIndex) to
+-- the outside world's view (a URL).  Also has the cache time and
+-- the associated component.
+data ComponentFile = ComponentFile
+  { cf_componentFileIndex :: ComponentFileIndex
+  , cf_url                :: MyURL
+  , cf_componentId        :: ComponentId 
+  , cf_lastRefreshed      :: UTCTime
+  }
+  deriving (Eq, Ord, Read, Show, Data, Typeable)
+$(deriveSafeCopy 0 'base ''ComponentFile)
+
+instance Indexable ComponentFile where
+    empty =
+        ixSet [ ixFun $ (:[]) . cf_componentId
+              , ixFun $ (:[]) . cf_componentFileIndex
+              ]
+
 -- | the component configuration
 data Component = Component
     { componentId   :: ComponentId
@@ -66,7 +108,7 @@ data Component = Component
     , componentPath :: ComponentPath
     , added         :: UTCTime
     , userId        :: UserId
-    , url           :: Text
+    , url           :: MyURL
     }
     deriving (Eq, Ord, Read, Show, Data, Typeable)
 $(deriveSafeCopy 0 'base ''Component)
@@ -86,6 +128,7 @@ instance Indexable Component where
 data CtrlVState = CtrlVState
     { components      :: IxSet Component
     , nextComponentId :: ComponentId
+    , componentFiles  :: IxSet ComponentFile
     }
     deriving (Data, Typeable)
 $(deriveSafeCopy 0 'base ''CtrlVState)
@@ -95,6 +138,7 @@ initialCtrlVState :: CtrlVState
 initialCtrlVState =
     CtrlVState { components      = IxSet.empty
                , nextComponentId = ComponentId 1
+               , componentFiles  = IxSet.empty
                }
 
 ------------------------------------------------------------------------------
@@ -334,7 +378,7 @@ viewRecentPage acid =
            <td><a href=(ViewComponentById componentId)><% title       %></a></td>
            <td><a href=(ViewComponentByPath componentPath)><% componentPath %></a></td>
            <td><% added       %></td>
-           <td><% url         %></td>
+           <td><% unMyURL url         %></td>
            <td><% show $ unUserId userId %></td>
            <td><a href=(ViewPath componentPath)>View Path</a></td>
            <td><a href=(DeleteComponentPage componentId)>Delete</a></td>
@@ -384,11 +428,11 @@ viewPath acid cPath =
                 appTemplate acid "Path not found." () $
                     <p>Path <% cPath %> could not be found.</p>
          (Just component@Component{..}) ->
-             do entries <- liftIO $ dropBoxPathList $ Text.unpack url
+             do entries <- liftIO $ dropBoxPathList $ Text.unpack $ unMyURL url
                 ok ()
                 appTemplate acid ("Path " ++ (Text.unpack $ unComponentPath cPath)) () $
                   <div class="pathContents">
-                    <p>Path <% cPath %> has url <% url %></p>
+                    <p>Path <% cPath %> has url <% unMyURL url %></p>
                     <ul>
                     <% mapM (showEntry componentId) entries %>
                     </ul>
@@ -447,7 +491,7 @@ viewComponentPage acid mComponent failed =
                       <dt>Title:</dt><dd><% title %></dd>
                       <dt>Path:</dt><dd><% componentPath %></dd>
                       <dt>UserId:</dt><dd><% show $ unUserId userId %></dd>
-                      <dt>URL:</dt><dd><% url %></dd>
+                      <dt>URL:</dt><dd><% unMyURL url %></dd>
                      </dl>
                     </div>
 
@@ -531,7 +575,7 @@ componentForm userId =
                                    , componentPath     = ComponentPath cPath
                                    , added    = now
                                    , userId   = userId
-                                   , url      = url
+                                   , url      = MyURL url
                                    })
       required txt
           | Text.null txt = Left "Required"
