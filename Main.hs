@@ -145,6 +145,22 @@ initialCtrlVState =
 -- Acid-State events
 ------------------------------------------------------------------------------
 
+getCFsByCId :: ComponentId -> Query CtrlVState [ComponentFile]
+getCFsByCId cId = IxSet.toList . getEQ cId . componentFiles <$> ask
+
+getCFByCFI :: ComponentFileIndex -> Query CtrlVState (Maybe ComponentFile)
+getCFByCFI cfi = getOne . getEQ cfi . componentFiles <$> ask
+
+updateCF :: ComponentFile -> Update CtrlVState ()
+updateCF cf@ComponentFile{cf_componentFileIndex = cfi, ..} =
+  do cvs@CtrlVState{..} <- get
+     put $ cvs { componentFiles = IxSet.insert cf componentFiles }
+
+insertCF :: ComponentFile -> Update CtrlVState ()
+insertCF cf@ComponentFile{cf_componentFileIndex = cfi, ..} =
+ do cvs@CtrlVState{..} <- get
+    put $ cvs { componentFiles = IxSet.updateIx cfi cf componentFiles }
+
 deleteComponent :: ComponentId
             -> Update CtrlVState Bool
 deleteComponent componentId
@@ -201,6 +217,10 @@ $(makeAcidic ''CtrlVState
    , 'getComponentByPath
    , 'insertComponent
    , 'deleteComponent
+   , 'getCFsByCId
+   , 'getCFByCFI
+   , 'insertCF
+   , 'updateCF
    ])
 
 ------------------------------------------------------------------------------
@@ -259,6 +279,21 @@ withAcid mBasePath f =
     bracket (openLocalStateFrom (basePath </> "auth")        initialAuthState)        (createCheckpointAndClose) $ \auth ->
     bracket (openLocalStateFrom (basePath </> "profile")     initialProfileState)     (createCheckpointAndClose) $ \profile ->
         f (Acid auth profile)
+
+------------------------------------------------------------------------------
+-- Composite Data Functions
+------------------------------------------------------------------------------
+-- Stuff that operates on acid data by running its own queries.
+
+-- | "Do the thing".
+updateOrInsertCF :: Acid -> ComponentFile -> CtrlV ()
+updateOrInsertCF acid cf@ComponentFile{cf_componentFileIndex = cfi, ..} =
+  do
+    mCF <- query (GetCFByCFI cfi)
+    case mCF of
+      Nothing -> do update (InsertCF cf)
+      (Just dbcf) -> do update (UpdateCF cf)
+
 
 ------------------------------------------------------------------------------
 -- appTemplate
