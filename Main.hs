@@ -7,7 +7,7 @@ import qualified Data.IxSet as IxSet
 import Data.IxSet (IxSet, Indexable, Proxy(..), getEQ, getOne, ixSet, ixFun)
 import Data.Text  (Text)
 import qualified Data.Text as Text
-import Data.Time.Clock (UTCTime, getCurrentTime)
+import Data.Time.Clock (UTCTime, getCurrentTime, diffUTCTime)
 import Data.Maybe
 import HSP
 
@@ -90,7 +90,6 @@ data ComponentFile = ComponentFile
   { cf_componentFileIndex :: ComponentFileIndex
   , cf_url                :: MyURL
   , cf_componentId        :: ComponentId 
-  , cf_lastRefreshed      :: UTCTime
   }
   deriving (Eq, Ord, Read, Show, Data, Typeable)
 $(deriveSafeCopy 0 'base ''ComponentFile)
@@ -109,6 +108,7 @@ data Component = Component
     , added         :: UTCTime
     , userId        :: UserId
     , url           :: MyURL
+    , refreshed     :: UTCTime
     }
     deriving (Eq, Ord, Read, Show, Data, Typeable)
 $(deriveSafeCopy 0 'base ''Component)
@@ -472,19 +472,33 @@ dropBoxPathList pageUrl = do
 dropBoxListPageToCFs :: Component -> CtrlV [(ComponentFileIndex, MyURL)]
 dropBoxListPageToCFs component@Component{..} = do
   entries <- liftIO $ dropBoxPathList url
-  mapM makeStuff entries
+  now <- liftIO getCurrentTime
+
+  -- If the cache has expired
+  --
+  -- FIXME: cache time should be in a config file
+  if (diffUTCTime now refreshed) > 60 then
+      do
+        cId <- update (InsertComponent component { refreshed  = now })
+        mapM makeStuff entries
+    else
+      do
+        cfs <- query (GetCFsByCId componentId)
+        return $ map findStuff cfs
+
   where
+    findStuff :: ComponentFile -> (ComponentFileIndex, MyURL)
+    findStuff cf@ComponentFile{..} = (cf_componentFileIndex, cf_url)
+
     makeStuff :: (String, String) -> CtrlV (ComponentFileIndex, MyURL)
     makeStuff (fileURL, fileName) = do
       let mycfi = ComponentFileIndex { cfi_componentPath = componentPath
                                      , cfi_name          = Text.pack fileName
                                      }
-      now <- liftIO getCurrentTime
       cfi <- updateOrInsertCF $
         ComponentFile { cf_componentFileIndex = mycfi
           , cf_url            = MyURL fileURL
           , cf_componentId    = componentId
-          , cf_lastRefreshed  = now
           }
       return (cfi, MyURL fileURL)
 
@@ -640,12 +654,13 @@ componentForm userId =
       toComponent (ttl, cPath, fmt, url) =
           do now <- liftIO getCurrentTime
              return $ Right $
-                        (Component { componentId  = ComponentId 0
-                                   , title    = ttl
-                                   , componentPath     = ComponentPath cPath
-                                   , added    = now
-                                   , userId   = userId
-                                   , url      = MyURL $ Text.unpack url
+                        (Component { componentId     = ComponentId 0
+                                   , title           = ttl
+                                   , componentPath   = ComponentPath cPath
+                                   , added           = now
+                                   , userId          = userId
+                                   , url             = MyURL $ Text.unpack url
+                                   , refreshed       = now
                                    })
       required txt
           | Text.null txt = Left "Required"
