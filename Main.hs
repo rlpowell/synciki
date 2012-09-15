@@ -151,6 +151,12 @@ getCFsByCId cId = IxSet.toList . getEQ cId . componentFiles <$> ask
 getCFByCFI :: ComponentFileIndex -> Query CtrlVState (Maybe ComponentFile)
 getCFByCFI cfi = getOne . getEQ cfi . componentFiles <$> ask
 
+getCFByCFIParts :: ComponentPath -> Text -> Query CtrlVState (Maybe ComponentFile)
+getCFByCFIParts cpath name = getCFByCFI ComponentFileIndex
+  { cfi_componentPath = cpath
+  , cfi_name          = name
+  }
+
 updateCF :: ComponentFile -> Update CtrlVState ComponentFileIndex
 updateCF cf@ComponentFile{cf_componentFileIndex = cfi, ..} =
   do cvs@CtrlVState{..} <- get
@@ -221,6 +227,7 @@ $(makeAcidic ''CtrlVState
    , 'deleteComponent
    , 'getCFsByCId
    , 'getCFByCFI
+   , 'getCFByCFIParts
    , 'insertCF
    , 'updateCF
    ])
@@ -239,7 +246,7 @@ data Route
     | CSS
     | U_AuthProfile AuthProfileURL
     | ViewPath ComponentPath
-    | ViewPathPage ComponentId String String
+    | ViewPathPage ComponentId ComponentPath Text
       deriving (Eq, Ord, Read, Show, Data, Typeable)
 
 -- | we will just use template haskell to derive the route mapping
@@ -521,32 +528,40 @@ viewPath acid cPath =
                     </ul>
                   </div>
     where 
-      showEntry :: (XMLGenerator m, EmbedAsAttr m (Attr String Route)) => ComponentId -> (ComponentFileIndex, MyURL) -> HSX.GenChildList m
+      showEntry :: ComponentId -> (ComponentFileIndex, MyURL) -> XMLGenT CtrlV' (XMLType CtrlV')
       showEntry cId (cfi, myurl) = 
         let url = unMyURL myurl
-            name = Text.unpack $ cfi_name cfi
+            name = cfi_name cfi
+            cfpath = cfi_componentPath cfi
           in
-            <%>
-              <li>
-              <a href=(ViewPathPage cId (url ++ "?dl=1") name)><% name %></a>
-              </li>
-            </%>
+            <li>
+            <a href=(ViewPathPage cId cfpath name)><% name %></a>
+            </li>
 
-renderPage :: EmbedAsChild m String => String -> XMLGenT m (XMLType m)
+renderPage :: MyURL -> XMLGenT CtrlV' (XMLType CtrlV')
 renderPage pageUrl =
-  <p>some stuff</p>
+  <p>some stuff: <% unMyURL pageUrl %></p>
 
-viewPathPage :: Acid -> ComponentId -> String -> String -> CtrlV Response
-viewPathPage acid cId pageUrl name =
+viewPathPage :: Acid -> ComponentId -> ComponentPath -> Text -> CtrlV Response
+viewPathPage acid cId cPath name =
   do mComponent <- query (GetComponentById cId)
      case mComponent of
         Nothing ->
-          do notFound ()
-             appTemplate acid "Id not found." () $
-                <p>Component ID <% cId %> could not be found.</p>
+          do
+            notFound ()
+            appTemplate acid "Id not found." () $
+              <p>Component ID <% cId %> could not be found.</p>
         (Just component@Component{..}) ->
-          do pageHtml <- renderPage pageUrl
-             appTemplate acid ("Page " ++ name ++ " in section " ++ (Text.unpack $ unComponentPath componentPath)) () pageHtml
+          do 
+            mCF <- query (GetCFByCFIParts cPath name)
+            case mCF of
+              Nothing -> do
+                notFound ()
+                appTemplate acid "Path/Name not found." () $
+                  <p>Component File <% cPath %>/<% name %> could not be found.</p>
+              (Just cf@ComponentFile{..}) -> do
+                pageHtml <- renderPage cf_url
+                appTemplate acid ("Page " ++ (Text.unpack name) ++ " in section " ++ (Text.unpack $ unComponentPath componentPath)) () pageHtml
 
 
 
