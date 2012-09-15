@@ -64,7 +64,7 @@ data Format
       deriving (Eq, Ord, Read, Show, Enum, Bounded, Data, Typeable)
 $(deriveSafeCopy 0 'base ''Format)
 
-newtype MyURL = MyURL { unMyURL :: Text }
+newtype MyURL = MyURL { unMyURL :: String }
     deriving (Eq, Ord, Read, Show, Data, Typeable, SafeCopy)
 
 ----------------------
@@ -151,15 +151,17 @@ getCFsByCId cId = IxSet.toList . getEQ cId . componentFiles <$> ask
 getCFByCFI :: ComponentFileIndex -> Query CtrlVState (Maybe ComponentFile)
 getCFByCFI cfi = getOne . getEQ cfi . componentFiles <$> ask
 
-updateCF :: ComponentFile -> Update CtrlVState ()
+updateCF :: ComponentFile -> Update CtrlVState ComponentFileIndex
 updateCF cf@ComponentFile{cf_componentFileIndex = cfi, ..} =
   do cvs@CtrlVState{..} <- get
      put $ cvs { componentFiles = IxSet.insert cf componentFiles }
+     return cfi
 
-insertCF :: ComponentFile -> Update CtrlVState ()
+insertCF :: ComponentFile -> Update CtrlVState ComponentFileIndex
 insertCF cf@ComponentFile{cf_componentFileIndex = cfi, ..} =
  do cvs@CtrlVState{..} <- get
     put $ cvs { componentFiles = IxSet.updateIx cfi cf componentFiles }
+    return cfi
 
 deleteComponent :: ComponentId
             -> Update CtrlVState Bool
@@ -286,14 +288,13 @@ withAcid mBasePath f =
 -- Stuff that operates on acid data by running its own queries.
 
 -- | "Do the thing".
-updateOrInsertCF :: Acid -> ComponentFile -> CtrlV ()
-updateOrInsertCF acid cf@ComponentFile{cf_componentFileIndex = cfi, ..} =
+updateOrInsertCF :: ComponentFile -> CtrlV ComponentFileIndex
+updateOrInsertCF cf@ComponentFile{cf_componentFileIndex = cfi, ..} =
   do
     mCF <- query (GetCFByCFI cfi)
     case mCF of
       Nothing -> do update (InsertCF cf)
       (Just dbcf) -> do update (UpdateCF cf)
-
 
 ------------------------------------------------------------------------------
 -- appTemplate
@@ -433,6 +434,9 @@ css tag = HXT.multi (HXT.hasName tag)
 -- Accessory function stolen from
 -- http://adit.io/posts/2012-03-10-building_a_concurrent_web_scraper_with_haskell.html ,
 -- with modifications to use http-conduit
+-- 
+-- FIXME: There's probably all *kinds* of error handling we're not
+-- doing here; what does NHC.simpleHttp return on error?
 webPageGet :: String -> IO (HXT.IOSArrow HXT.XmlTree (NTree HXT.XNode))
 webPageGet pageUrl = do
   contents <- NHC.simpleHttp pageUrl
@@ -443,16 +447,46 @@ fullFilePair :: String -> Maybe (String, String)
 fullFilePair = [rex|^(?{ }.*/(?{ }[^/.]+)\.txt)$|]
 
 -- Given a dropbox public URL, pull all the hrefs, turn them into
--- url/file basename pairs, and turn those into a widget
-dropBoxPathList :: String -> IO [(String, String)]
+-- pairs of the URL and the file's basename
+--
+-- FIXME: note that the second bit here, which becomes the cfi_name,
+-- is completely wrong; it should be extracted by parsing the file.
+-- 
+-- FIXME: There's probably all *kinds* of error handling we're not
+-- doing here; what does webPageGet return on error?
+dropBoxPathList :: MyURL -> IO [(String, String)]
 dropBoxPathList pageUrl = do
-  page <- liftIO $ webPageGet pageUrl
+  page <- liftIO $ webPageGet $ unMyURL pageUrl
   -- Most of this next line is from
   -- http://adit.io/posts/2012-03-10-building_a_concurrent_web_scraper_with_haskell.html
   hrefs <- HXT.runX $ page
                   HXT.>>> css "a" 
                   HXT.>>> HXT.getAttrValue "href"
   return $ nub $ catMaybes $ map fullFilePair hrefs
+
+-- | Given a component, pull the list page and cache the file
+-- information therefrom.
+--
+-- FIXME: There's probably all *kinds* of error handling we're not
+-- doing here; fix this when we fix dropBoxPathList and webPageGet 
+dropBoxListPageToCFs :: Component -> CtrlV [(ComponentFileIndex, MyURL)]
+dropBoxListPageToCFs component@Component{..} = do
+  entries <- liftIO $ dropBoxPathList url
+  mapM makeStuff entries
+  where
+    makeStuff :: (String, String) -> CtrlV (ComponentFileIndex, MyURL)
+    makeStuff (fileURL, fileName) = do
+      let mycfi = ComponentFileIndex { cfi_componentPath = componentPath
+                                     , cfi_name          = Text.pack fileName
+                                     }
+      now <- liftIO getCurrentTime
+      cfi <- updateOrInsertCF $
+        ComponentFile { cf_componentFileIndex = mycfi
+          , cf_url            = MyURL fileURL
+          , cf_componentId    = componentId
+          , cf_lastRefreshed  = now
+          }
+      return (cfi, MyURL fileURL)
 
 viewPath :: Acid -> ComponentPath -> CtrlV Response
 viewPath acid cPath =
@@ -463,7 +497,7 @@ viewPath acid cPath =
                 appTemplate acid "Path not found." () $
                     <p>Path <% cPath %> could not be found.</p>
          (Just component@Component{..}) ->
-             do entries <- liftIO $ dropBoxPathList $ Text.unpack $ unMyURL url
+             do entries <- liftIO $ dropBoxPathList url
                 ok ()
                 appTemplate acid ("Path " ++ (Text.unpack $ unComponentPath cPath)) () $
                   <div class="pathContents">
@@ -610,7 +644,7 @@ componentForm userId =
                                    , componentPath     = ComponentPath cPath
                                    , added    = now
                                    , userId   = userId
-                                   , url      = MyURL url
+                                   , url      = MyURL $ Text.unpack url
                                    })
       required txt
           | Text.null txt = Left "Required"
