@@ -515,7 +515,7 @@ viewPath acid cPath =
                 ok ()
                 appTemplate acid ("Path " ++ (Text.unpack $ unComponentPath cPath)) () $
                   <div class="pathContents">
-                    <p>Path <% cPath %> has url <% unMyURL url %></p>
+                    <p>Path <% cPath %> has url <% unMyURL url %>; last refresh at <% refreshed %></p>
                     <ul>
                     <% mapM (showEntry componentId) entries %>
                     </ul>
