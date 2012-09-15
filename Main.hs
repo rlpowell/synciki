@@ -511,8 +511,7 @@ viewPath acid cPath =
                 appTemplate acid "Path not found." () $
                     <p>Path <% cPath %> could not be found.</p>
          (Just component@Component{..}) ->
-             do entries <- liftIO $ dropBoxPathList url
-                entries2 <- dropBoxListPageToCFs component
+             do entries <- dropBoxListPageToCFs component
                 ok ()
                 appTemplate acid ("Path " ++ (Text.unpack $ unComponentPath cPath)) () $
                   <div class="pathContents">
@@ -522,10 +521,16 @@ viewPath acid cPath =
                     </ul>
                   </div>
     where 
-      showEntry cId entry = 
-        <li>
-         <a href=(ViewPathPage cId ((fst entry) ++ "?dl=1") (snd entry))><% snd entry %></a>
-        </li>
+      showEntry :: (XMLGenerator m, EmbedAsAttr m (Attr String Route)) => ComponentId -> (ComponentFileIndex, MyURL) -> HSX.GenChildList m
+      showEntry cId (cfi, myurl) = 
+        let url = unMyURL myurl
+            name = Text.unpack $ cfi_name cfi
+          in
+            <%>
+              <li>
+              <a href=(ViewPathPage cId (url ++ "?dl=1") name)><% name %></a>
+              </li>
+            </%>
 
 renderPage :: EmbedAsChild m String => String -> XMLGenT m (XMLType m)
 renderPage pageUrl =
