@@ -498,6 +498,7 @@ viewPath acid cPath =
                     <p>Path <% cPath %> could not be found.</p>
          (Just component@Component{..}) ->
              do entries <- liftIO $ dropBoxPathList url
+                entries2 <- dropBoxListPageToCFs component
                 ok ()
                 appTemplate acid ("Path " ++ (Text.unpack $ unComponentPath cPath)) () $
                   <div class="pathContents">
