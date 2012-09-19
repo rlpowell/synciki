@@ -582,13 +582,21 @@ instance EmbedAsChild CtrlV' UTCTime where
 -- Pages
 ------------------------------------------------------------------------------
 
-pathTable :: Acid -> XMLGenT CtrlV' (XMLType CtrlV')
-pathTable acid@Acid{..} = do
+ifLoggedInXML :: Acid -> GenXML CtrlV'-> (UserId -> GenXML CtrlV') -> GenXML CtrlV'
+ifLoggedInXML acid@Acid{..} no yes = do
   mUserId <- getUserId acidAuth acidProfile
   case mUserId of
-    Nothing -> <p>You Are Not Logged In</p>
+    Nothing -> do
+      method GET
+      no
     (Just uid) -> do
       method GET
+      (yes uid)
+
+
+pathTable :: Acid -> GenXML CtrlV'
+pathTable acid = do
+  ifLoggedInXML acid (<p>You Are Not Logged In</p>) $ \uid -> do
       paths <- query (GetPathsByUserId uid)
       case paths of
          [] -> <p>There are no paths yet.</p>
@@ -620,13 +628,9 @@ pathTable acid@Acid{..} = do
            <td><a href=(AdminDeletePath pathId)>Delete</a></td>
           </tr>
 
-sourceTable :: Acid -> XMLGenT CtrlV' (XMLType CtrlV')
+sourceTable :: Acid -> GenXML CtrlV'
 sourceTable acid@Acid{..} = do
-  mUserId <- getUserId acidAuth acidProfile
-  case mUserId of
-    Nothing -> <p>You Are Not Logged In</p>
-    (Just uid) -> do
-      method GET
+  ifLoggedInXML acid (<p>You Are Not Logged In</p>) $ \uid -> do
       sources <- query (GetSourcesByUserId uid)
       case sources of
          [] -> <p>There are no sources yet.</p>
@@ -662,52 +666,53 @@ sourceTable acid@Acid{..} = do
            <td><a href=(AdminDeleteSource sourceId)>Delete</a></td>
           </tr>
 
+ifLoggedInResponse :: Acid -> String -> GenXML CtrlV' -> (UserId -> GenXML CtrlV') -> CtrlV Response
+ifLoggedInResponse acid@Acid{..} title no yes = do
+  mUserId <- getUserId acidAuth acidProfile
+  case mUserId of
+    Nothing -> appTemplate acid title () $ do 
+      method GET
+      no
+    (Just uid) -> appTemplate acid title () $ do
+      method GET
+      (yes uid)
+
 -- FIXME: Duplicates adminViewPath, which is silly
 adminViewAll :: Acid -> CtrlV Response
 adminViewAll acid@Acid{..} = do
-  mUserId <- getUserId acidAuth acidProfile
-  case mUserId of
-    Nothing ->
-      appTemplate acid "View All" () $
-        <%>
-          <h1>You Are Not Logged In</h1>
-        </%>
-    (Just uid) -> do
-      method GET
-      paths <- query (GetPathsByUserId uid)
-      case paths of
-         [] -> appTemplate acid "View All" () <p>There are no paths yet.</p>
-         _  -> appTemplate acid "View All" () $
-                <%>
-                 <h1>Your Paths</h1>
-                 <% pathTable acid %>
-                 <h1>Your Sources</h1>
-                 <% sourceTable acid %>
-                </%>
+  ifLoggedInResponse acid "View All" <h1>You Are Not Logged In</h1> $ \uid -> do
+    <div class="view-all-content">
+      <h1>Your Paths</h1>
+      <% pathTable acid %>
+      <h1>Your Sources</h1>
+      <% sourceTable acid %>
+    </div>
+
 
 -- FIXME: Duplicates adminViewAll, which is silly.  Needs to show
 -- sources.
 adminViewPath :: Acid -> PathId -> CtrlV Response
 adminViewPath acid pid = do
-  method GET
-  mPath <- query (GetPath pid)
-  case mPath of
-    Nothing ->
-             do notFound ()
-                appTemplate acid "Path not found." () $
-                  "Path id " ++ (show $ unPathId pid) ++ " could not be found."
-    (Just Path{..}) ->
-             do ok ()
-                appTemplate acid ("Path " ++ (unPathSlug pathSlug)) () $
-                    <div class="path">
-                     <dl class="path-header">
-                      <dt>Path:</dt><dd><a href=(AdminViewPath pid)><% pid %></a></dd>
-                      <dt>Slug:</dt><dd><% pathSlug %></dd>
-                      <dt>Host:</dt><dd><% pathHost %></dd>
-                      <dt>UserId:</dt><dd><% pathUserId %></dd>
-                      <dt>Added:</dt><dd><% pathAdded %></dd>
-                     </dl>
-                    </div>
+  ifLoggedInResponse acid "View Path" <h1>You Are Not Logged In</h1> $ \uid -> do
+    mPath <- query (GetPath pid)
+    case mPath of
+      Nothing -> do
+        notFound ()
+        <p>Path id <% pid %> could not be found.</p>
+      (Just Path{..}) -> do 
+        if pathUserId == uid then do
+            ok ()
+            <div class="path">
+               <dl class="path-header">
+                  <dt>Path:</dt><dd><a href=(AdminViewPath pid)><% pid %></a></dd>
+                  <dt>Slug:</dt><dd><% pathSlug %></dd>
+                  <dt>Host:</dt><dd><% pathHost %></dd>
+                  <dt>UserId:</dt><dd><% pathUserId %></dd>
+                  <dt>Added:</dt><dd><% pathAdded %></dd>
+               </dl>
+            </div>
+          else
+            <p>Path <% pathSlug %> is not owned by you.</p>
 
 adminViewSource :: Acid -> SourceId -> CtrlV Response
 adminViewSource acid sid = do
