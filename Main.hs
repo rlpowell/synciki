@@ -603,7 +603,6 @@ pathTable acid = do
          _  -> <table>
                   <thead>
                    <tr>
-                    <th>id</th>
                     <th>slug</th>
                     <th>host</th>
                     <th>date added</th>
@@ -619,8 +618,7 @@ pathTable acid = do
     where
       mkTableRow Path{..} =
           <tr>
-           <td><a href=(AdminViewPath pathId)><% pathId %></a></td>
-           <td><a href=(AdminViewPath pathId)><% pathSlug       %></a></td>
+           <td><% pathSlug       %></td>
            <td><% pathHost       %></td>
            <td><% pathAdded %></td>
            <td><a href=(AdminViewPath pathId)>View</a></td>
@@ -637,7 +635,6 @@ sourceTable acid@Acid{..} = do
          _  -> <table>
                   <thead>
                    <tr>
-                    <th>id</th>
                     <th>url</th>
                     <th>type</th>
                     <th>format</th>
@@ -655,7 +652,6 @@ sourceTable acid@Acid{..} = do
     where
       mkTableRow Source{..} =
           <tr>
-           <td><a href=(AdminViewSource sourceId)><% sourceId %></a></td>
            <td><% sourceURL       %></td>
            <td><% sourceType       %></td>
            <td><% sourceFormat %></td>
@@ -677,7 +673,6 @@ ifLoggedInResponse acid@Acid{..} title no yes = do
       method GET
       (yes uid)
 
--- FIXME: Duplicates adminViewPath, which is silly
 adminViewAll :: Acid -> CtrlV Response
 adminViewAll acid@Acid{..} = do
   ifLoggedInResponse acid "View All" <h1>You Are Not Logged In</h1> $ \uid -> do
@@ -689,8 +684,9 @@ adminViewAll acid@Acid{..} = do
     </div>
 
 
--- FIXME: Duplicates adminViewAll, which is silly.  Needs to show
--- sources.
+-- FIXME: Needs to show sources.
+--
+-- FIXME: It would be nice to somehow de-duplicate this with adminViewAll
 adminViewPath :: Acid -> PathId -> CtrlV Response
 adminViewPath acid pid = do
   ifLoggedInResponse acid "View Path" <h1>You Are Not Logged In</h1> $ \uid -> do
@@ -712,11 +708,32 @@ adminViewPath acid pid = do
                </dl>
             </div>
           else
-            <p>Path <% pathSlug %> is not owned by you.</p>
+            <p>Path <% pathSlug %>/<% pid %> is not owned by you.</p>
 
+-- FIXME: It would be nice to somehow de-duplicate this with adminViewAll
 adminViewSource :: Acid -> SourceId -> CtrlV Response
 adminViewSource acid sid = do
-                appTemplate acid "unfinished" () $ <p>unfinished</p>
+  ifLoggedInResponse acid "View Source" <h1>You Are Not Logged In</h1> $ \uid -> do
+    mSource <- query (GetSource sid)
+    case mSource of
+      Nothing -> do
+        notFound ()
+        <p>Source id <% sid %> could not be found.</p>
+      (Just Source{..}) -> do 
+        if sourceUserId == uid then do
+            ok ()
+            <div class="source">
+               <dl class="source-header">
+                  <dt>URL:</dt><dd><% sourceURL %></dd>
+                  <dt>Type:</dt><dd><% sourceType %></dd>
+                  <dt>Format:</dt><dd><% sourceFormat %></dd>
+                  <dt>Refreshed:</dt><dd><% sourceRefreshed %></dd>
+                  <dt>Added:</dt><dd><% sourceAdded %></dd>
+               </dl>
+            </div>
+          else
+            <p>Source <% sourceURL %>/<% sid %> is not owned by you.</p>
+
 
 adminViewPage :: Acid -> PageId -> CtrlV Response
 adminViewPage acid pid = do
