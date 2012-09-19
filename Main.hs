@@ -371,13 +371,10 @@ data Route
     | AdminViewPage PageId
     | AdminNewPath
     | AdminNewSource
-    | AdminNewPage
     | AdminEditPath PathId
     | AdminEditSource SourceId
-    | AdminEditPage PageId
     | AdminDeletePath PathId
     | AdminDeleteSource SourceId
-    | AdminDeletePage PageId
     | ViewPage PathHost PathSlug PageSlug
     | CSS
     | U_AuthProfile AuthProfileURL
@@ -400,13 +397,10 @@ route acid@Acid{..} baseURL url =
       (AdminViewPage pid)                -> adminViewPage acid pid
       AdminNewPath                       -> adminNewPath acid
       AdminNewSource                     -> adminNewSource acid
-      AdminNewPage                       -> adminNewPage acid
       (AdminEditPath pid)                -> adminEditPath acid pid
       (AdminEditSource sid)              -> adminEditSource acid sid
-      (AdminEditPage pid)                -> adminEditPage acid pid
       (AdminDeletePath pid)              -> adminDeletePath acid pid
       (AdminDeleteSource sid)            -> adminDeleteSource acid sid
-      (AdminDeletePage pid)              -> adminDeletePage acid pid
       (ViewPage phost pathSlug pageSlug) -> viewPage acid phost pathSlug pageSlug
       CSS                                -> serveFile (asContentType "text/css") "style.css"
       -- FIXME: replace the AdminViewAll thing here with "go back to
@@ -506,7 +500,6 @@ baseAppTemplate Acid{..} ttl moreHdrs bdy =
       <ul class="menu">
         <li><a href=AdminViewAll>Admin View</a></li>
         <li><a href=AdminNewPath>Add Path</a></li>
-        <li><a href=AdminNewPage>Add Page</a></li>
         <li><a href=AdminNewSource>Add Source</a></li>
       </ul>
       <% do
@@ -570,6 +563,15 @@ instance EmbedAsChild CtrlV' PathHost where
 instance EmbedAsChild CtrlV' MyURL where
     asChild (MyURL url) = asChild url
 
+instance EmbedAsChild CtrlV' SourceType where
+    asChild DropBoxIndex = asChild ("DropBox Index/Directory Page" :: String)
+    asChild GoogleDriveIndex = asChild ("Google Drive Index/Directory Page" :: String)
+
+-- FIXME: should show something more user friendly here
+instance EmbedAsChild CtrlV' Format where
+    asChild PlainText = asChild ("Plain/Unformatted Text" :: String)
+    asChild Pandoc = asChild ("Pandoc (Enhanced Markdown)" :: String)
+
 -- | This makes it easy to embed a timestamp into an HSP
 -- template. 'show' provides way too much precision, so something
 -- using formatTime would be better.
@@ -579,6 +581,86 @@ instance EmbedAsChild CtrlV' UTCTime where
 ------------------------------------------------------------------------------
 -- Pages
 ------------------------------------------------------------------------------
+
+pathTable :: Acid -> XMLGenT CtrlV' (XMLType CtrlV')
+pathTable acid@Acid{..} = do
+  mUserId <- getUserId acidAuth acidProfile
+  case mUserId of
+    Nothing -> <p>You Are Not Logged In</p>
+    (Just uid) -> do
+      method GET
+      paths <- query (GetPathsByUserId uid)
+      case paths of
+         [] -> <p>There are no paths yet.</p>
+         _  -> <table>
+                  <thead>
+                   <tr>
+                    <th>id</th>
+                    <th>slug</th>
+                    <th>host</th>
+                    <th>date added</th>
+                    <th>View</th>
+                    <th>Edit</th>
+                    <th>Delete</th>
+                   </tr>
+                  </thead>
+                  <tbody>
+                   <% mapM mkTableRow paths %>
+                  </tbody>
+                 </table>
+    where
+      mkTableRow Path{..} =
+          <tr>
+           <td><a href=(AdminViewPath pathId)><% pathId %></a></td>
+           <td><a href=(AdminViewPath pathId)><% pathSlug       %></a></td>
+           <td><% pathHost       %></td>
+           <td><% pathAdded %></td>
+           <td><a href=(AdminViewPath pathId)>View</a></td>
+           <td><a href=(AdminEditPath pathId)>Edit</a></td>
+           <td><a href=(AdminDeletePath pathId)>Delete</a></td>
+          </tr>
+
+sourceTable :: Acid -> XMLGenT CtrlV' (XMLType CtrlV')
+sourceTable acid@Acid{..} = do
+  mUserId <- getUserId acidAuth acidProfile
+  case mUserId of
+    Nothing -> <p>You Are Not Logged In</p>
+    (Just uid) -> do
+      method GET
+      sources <- query (GetSourcesByUserId uid)
+      case sources of
+         [] -> <p>There are no sources yet.</p>
+         _  -> <table>
+                  <thead>
+                   <tr>
+                    <th>id</th>
+                    <th>url</th>
+                    <th>type</th>
+                    <th>format</th>
+                    <th>date last refreshed</th>
+                    <th>date added</th>
+                    <th>View</th>
+                    <th>Edit</th>
+                    <th>Delete</th>
+                   </tr>
+                  </thead>
+                  <tbody>
+                   <% mapM mkTableRow sources %>
+                  </tbody>
+                 </table>
+    where
+      mkTableRow Source{..} =
+          <tr>
+           <td><a href=(AdminViewSource sourceId)><% sourceId %></a></td>
+           <td><% sourceURL       %></td>
+           <td><% sourceType       %></td>
+           <td><% sourceFormat %></td>
+           <td><% sourceRefreshed %></td>
+           <td><% sourceAdded %></td>
+           <td><a href=(AdminViewSource sourceId)>View</a></td>
+           <td><a href=(AdminEditSource sourceId)>Edit</a></td>
+           <td><a href=(AdminDeleteSource sourceId)>Delete</a></td>
+          </tr>
 
 -- FIXME: Duplicates adminViewPath, which is silly
 adminViewAll :: Acid -> CtrlV Response
@@ -598,34 +680,10 @@ adminViewAll acid@Acid{..} = do
          _  -> appTemplate acid "View All" () $
                 <%>
                  <h1>Your Paths</h1>
-                 <table>
-                  <thead>
-                   <tr>
-                    <th>id</th>
-                    <th>slug</th>
-                    <th>host</th>
-                    <th>userid</th>
-                    <th>date added</th>
-                    <th>View</th>
-                    <th>Delete</th>
-                   </tr>
-                  </thead>
-                  <tbody>
-                   <% mapM mkTableRow paths %>
-                  </tbody>
-                 </table>
+                 <% pathTable acid %>
+                 <h1>Your Sources</h1>
+                 <% sourceTable acid %>
                 </%>
-    where
-      mkTableRow Path{..} =
-          <tr>
-           <td><a href=(AdminViewPath pathId)><% pathId %></a></td>
-           <td><a href=(AdminViewPath pathId)><% pathSlug       %></a></td>
-           <td><% pathHost       %></td>
-           <td><% pathUserId %></td>
-           <td><% pathAdded %></td>
-           <td><a href=(AdminEditPath pathId)>View</a></td>
-           <td><a href=(AdminDeletePath pathId)>Delete</a></td>
-          </tr>
 
 -- FIXME: Duplicates adminViewAll, which is silly.  Needs to show
 -- sources.
@@ -651,12 +709,12 @@ adminViewPath acid pid = do
                      </dl>
                     </div>
 
-adminViewPage :: Acid -> PageId -> CtrlV Response
-adminViewPage acid pid = do
-                appTemplate acid "unfinished" () $ <p>unfinished</p>
-
 adminViewSource :: Acid -> SourceId -> CtrlV Response
 adminViewSource acid sid = do
+                appTemplate acid "unfinished" () $ <p>unfinished</p>
+
+adminViewPage :: Acid -> PageId -> CtrlV Response
+adminViewPage acid pid = do
                 appTemplate acid "unfinished" () $ <p>unfinished</p>
 
 adminNewPath :: Acid -> CtrlV Response
@@ -759,20 +817,12 @@ sourceForm userId =
           | Text.null txt = Left "Required"
           | otherwise     = Right txt
 
-adminNewPage :: Acid -> CtrlV Response
-adminNewPage acid@Acid{..} = do
-                appTemplate acid "unfinished" () $ <p>unfinished</p>
-
 adminEditPath :: Acid -> PathId -> CtrlV Response
 adminEditPath acid@Acid{..} pid = do
                 appTemplate acid "unfinished" () $ <p>unfinished</p>
 
 adminEditSource :: Acid -> SourceId -> CtrlV Response
 adminEditSource acid@Acid{..} sid = do
-                appTemplate acid "unfinished" () $ <p>unfinished</p>
-
-adminEditPage :: Acid -> PageId -> CtrlV Response
-adminEditPage acid@Acid{..} pid = do
                 appTemplate acid "unfinished" () $ <p>unfinished</p>
 
 adminDeletePath :: Acid -> PathId -> CtrlV Response
@@ -797,11 +847,24 @@ adminDeletePath acid@Acid{..} pid =
 
 adminDeleteSource :: Acid -> SourceId -> CtrlV Response
 adminDeleteSource acid@Acid{..} sid = do
-                appTemplate acid "unfinished" () $ <p>unfinished</p>
+    do mUserId <- getUserId acidAuth acidProfile
+       case mUserId of
+          Nothing ->
+            appTemplate acid "Delete A Source" () $
+              <%>
+                <h1>You Are Not Logged In</h1>
+              </%>
+          (Just uid) ->
+            -- FIXME: Make sure the uid matches!
+            if unSourceId sid > 0 then do
+              retval <- update (DeleteSource sid)
+              seeOtherURL AdminViewAll
+            else
+              appTemplate acid "Delete a Source" () $
+                <%>
+                  <h1>Invalid Source ID <% sid %></h1>
+                </%>
 
-adminDeletePage :: Acid -> PageId -> CtrlV Response
-adminDeletePage acid@Acid{..} pid = do
-                appTemplate acid "unfinished" () $ <p>unfinished</p>
 
 -- | convert a content page to HTML. We currently only support
 -- 'PlainText', but eventually it might do syntax hightlighting,
@@ -809,11 +872,11 @@ adminDeletePage acid@Acid{..} pid = do
 --
 -- Note that we do not have to worry about escaping the txt
 -- value.. that is done automatically by HSP.
-formatPage :: Format -> Text -> CtrlV XML
-formatPage PlainText txt =
-    <pre>plain: <% txt %></pre>
-formatPage Pandoc txt =
-    <pre>pandoc: <% txt %></pre>
+-- formatPage :: Format -> Text -> CtrlV XML
+-- formatPage PlainText txt =
+--     <pre>plain: <% txt %></pre>
+-- formatPage Pandoc txt =
+--     <pre>pandoc: <% txt %></pre>
 
 -- BEGIN dropbox stuff
 
