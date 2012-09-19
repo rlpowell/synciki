@@ -725,19 +725,11 @@ adminViewPage acid pid = do
 adminNewPath :: Acid -> CtrlV Response
 adminNewPath acid@Acid{..} = do
     here <- whereami
-    mUserId <- getUserId acidAuth acidProfile
-    case mUserId of
-          Nothing ->
-            appTemplate acid "Add a Path" () $
-              <%>
-                <h1>You Are Not Logged In</h1>
-              </%>
-          (Just uid) ->
-            appTemplate acid "Add a Path" () $
-              <%>
-                <h1>Add A Path</h1>
-                <% reform (form here) "add" success Nothing (pathForm uid) %>
-              </%>
+    ifLoggedInResponse acid "Add A Path" <h1>You Are Not Logged In</h1> $ \uid -> do
+      <div class="add-path-content">
+        <h1>Add A Path</h1>
+        <% reform (form here) "add" success Nothing (pathForm uid) %>
+      </div>
     where
       success :: Path -> CtrlV Response
       success spath = do
@@ -772,19 +764,11 @@ pathForm userId =
 adminNewSource :: Acid -> CtrlV Response
 adminNewSource acid@Acid{..} = do
     here <- whereami
-    mUserId <- getUserId acidAuth acidProfile
-    case mUserId of
-          Nothing ->
-            appTemplate acid "Add a Source" () $
-              <%>
-                <h1>You Are Not Logged In</h1>
-              </%>
-          (Just uid) ->
-            appTemplate acid "Add a Source" () $
-              <%>
-                <h1>Add A Source</h1>
-                <% reform (form here) "add" success Nothing (sourceForm uid) %>
-              </%>
+    ifLoggedInResponse acid "Add A Source" <h1>You Are Not Logged In</h1> $ \uid -> do
+      <div class="add-source-content">
+        <h1>Add A Source</h1>
+        <% reform (form here) "add" success Nothing (sourceForm uid) %>
+      </div>
     where
       success :: Source -> CtrlV Response
       success ssource = do
@@ -831,8 +815,8 @@ adminEditSource acid@Acid{..} sid = do
                 appTemplate acid "unfinished" () $ <p>unfinished</p>
 
 adminDeletePath :: Acid -> PathId -> CtrlV Response
-adminDeletePath acid@Acid{..} pid =
-    do mUserId <- getUserId acidAuth acidProfile
+adminDeletePath acid@Acid{..} pid = do
+       mUserId <- getUserId acidAuth acidProfile
        case mUserId of
           Nothing ->
             appTemplate acid "Delete A Path" () $
@@ -852,7 +836,7 @@ adminDeletePath acid@Acid{..} pid =
 
 adminDeleteSource :: Acid -> SourceId -> CtrlV Response
 adminDeleteSource acid@Acid{..} sid = do
-    do mUserId <- getUserId acidAuth acidProfile
+       mUserId <- getUserId acidAuth acidProfile
        case mUserId of
           Nothing ->
             appTemplate acid "Delete A Source" () $
