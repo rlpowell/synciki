@@ -120,11 +120,11 @@ data Path = Path
   { pathId       :: PathId
   , pathSlug     :: PathSlug   -- UNIQUE in combination with host. FIXME: unenforced.
                                -- FIXME: Needs validation.
-  , pathHost    :: PathHost   -- UNIQUE in combination with slug. FIXME: unenforced.
+  , pathHost     :: PathHost   -- UNIQUE in combination with slug. FIXME: unenforced.
                                -- Currently unused, but would allow virtualhost sort of stuff
-  , pathUserId  :: UserId
+  , pathUserId   :: UserId
   , pathSources  :: [SourceId] -- A small list; 5 elements would be large
-  , pathAdded   :: UTCTime
+  , pathAdded    :: UTCTime
   }
   deriving (Eq, Ord, Read, Show, Data, Typeable)
 $(deriveSafeCopy 0 'base ''Path)
@@ -139,13 +139,13 @@ instance Indexable Path where
               ]
 
 data Source = Source
-  { sourceId      :: SourceId
-  , sourceURL     :: MyURL       -- FIXME: Needs validation
-  , sourceUserId :: UserId
-  , sourceType    :: SourceType
-  , format        :: Format
-  , refreshed     :: UTCTime
-  , sourceAdded  :: UTCTime
+  { sourceId        :: SourceId
+  , sourceURL       :: MyURL       -- FIXME: Needs validation
+  , sourceUserId    :: UserId
+  , sourceType      :: SourceType
+  , sourceFormat    :: Format
+  , sourceRefreshed :: UTCTime
+  , sourceAdded     :: UTCTime
   }
   deriving (Eq, Ord, Read, Show, Data, Typeable)
 $(deriveSafeCopy 0 'base ''Source)
@@ -165,8 +165,8 @@ $(derivePathInfo ''PageSlug)
 -- various data about them is cached in the Page structure.
 data Page = Page
   { pageId        :: PageId
-  , pageSourceId :: SourceId   -- UNIQUE IN COMBINATION WITH slug. FIXME: unenforced.
-  , pageUserId   :: UserId
+  , pageSourceId  :: SourceId   -- UNIQUE IN COMBINATION WITH slug. FIXME: unenforced.
+  , pageUserId    :: UserId
   , pageURL       :: MyURL
   , title         :: String
   , pageSlug      :: PageSlug   -- UNIQUE IN COMBINATION WITH sourceid. FIXME: unenforced.
@@ -285,7 +285,8 @@ deleteSource sid = do
 getPage :: PageId -> Query CtrlVState (Maybe Page)
 getPage pid = getOne . getEQ pid . pages <$> ask
 
--- NTS: Other ways to say it:
+-- NTS: Other ways to say it the above, for general Haskell
+-- learning:
 -- 
 -- getPage pid = fmap (getOne . getEQ pid . pages) ask
 --
@@ -498,39 +499,39 @@ baseAppTemplate :: ( XMLGenerator m
             -> headers  -- ^ extra headers to add to \<head\> tag
             -> body     -- ^ contents of \<body\> tag
             -> m (HSX.XMLType m)
-baseAppTemplate Acid{..} ttl moreHdrs bdy = HTML.defaultTemplate ttl <%><link rel="stylesheet" href=CSS type="text/css" media="screen" /><% moreHdrs %></%> $
-                <%>
-                 <div id="logo">^V</div>
-                 <ul class="menu">
-                  <li><a href=AdminViewAll>Admin View</a></li>
-                  <li><a href=AdminNewPath>Add Path</a></li>
-                  <li><a href=AdminNewPage>Add Page</a></li>
-                  <li><a href=AdminNewSource>Add Source</a></li>
-                 </ul>
-                   <% do mUserId <- getUserId acidAuth acidProfile
-
-                         -- Debugging
-                         -- authState <- query' acidAuth AskAuthState
-                         -- let authDump = traceMsg "authState: " $ ppDoc authState
-
-                         case mUserId of
-                            Nothing -> do
-                              <ul class="auth">
-                                <li>You are not logged in</li>
-                                <li><a href=(U_AuthProfile $ AuthURL A_Login)>login</a></li>
-                                <li><a href=(U_AuthProfile $ AuthURL A_CreateAccount)>create account</a></li>
-                              </ul>
-                            (Just uid) -> do
-                              <ul class="auth">
-                                <li>You are logged in with profile <% show $ unUserId uid %></li>
-                                -- Debugging
-                                -- <li><% show authDump %></li>
-                                <li><a href=(U_AuthProfile $ AuthURL A_Logout)>logout</a></li>
-                                <li><a href=(U_AuthProfile $ AuthURL A_AddAuth)>add another auth mode to your profile</a></li>
-                              </ul>
-                   %>
-                 <% bdy %>
-                </%>
+baseAppTemplate Acid{..} ttl moreHdrs bdy =
+  HTML.defaultTemplate ttl <%><link rel="stylesheet" href=CSS type="text/css" media="screen" /><% moreHdrs %></%> $
+    <%>
+      <div id="logo">^V</div>
+      <ul class="menu">
+        <li><a href=AdminViewAll>Admin View</a></li>
+        <li><a href=AdminNewPath>Add Path</a></li>
+        <li><a href=AdminNewPage>Add Page</a></li>
+        <li><a href=AdminNewSource>Add Source</a></li>
+      </ul>
+      <% do
+        mUserId <- getUserId acidAuth acidProfile
+        -- Debugging
+        -- authState <- query' acidAuth AskAuthState
+        -- let authDump = traceMsg "authState: " $ ppDoc authState
+        case mUserId of
+           Nothing -> do
+             <ul class="auth">
+               <li>You are not logged in</li>
+               <li><a href=(U_AuthProfile $ AuthURL A_Login)>login</a></li>
+               <li><a href=(U_AuthProfile $ AuthURL A_CreateAccount)>create account</a></li>
+             </ul>
+           (Just uid) -> do
+             <ul class="auth">
+               <li>You are logged in with profile <% show $ unUserId uid %></li>
+               -- Debugging
+               -- <li><% show authDump %></li>
+               <li><a href=(U_AuthProfile $ AuthURL A_Logout)>logout</a></li>
+               <li><a href=(U_AuthProfile $ AuthURL A_AddAuth)>add another auth mode to your profile</a></li>
+             </ul>
+        %>
+      <% bdy %>
+    </%>
 
 -- This is the baseAppTemplate wrapped so that it can be used in the
 -- normal happstack-foundation stuff.
@@ -688,13 +689,9 @@ pathForm userId =
        ul $
             (,) <$> (li $ label <span>slug</span>  ++> (inputText "" `transformEither` required) <++ errorList)
                 <*> (li $ label <span>host</span>   ++> (inputText "" `transformEither` required) <++ errorList)
-                -- <*> (li $ label <span>format</span> ++> formatForm)
-                -- <*> (li $ label <span>url</span>    ++> errorList ++> (inputText "http://" `transformEither` required))
                 <* inputSubmit "add path"
     )  `transformEitherM` toPath
     where
-      -- formatForm =
-      --     select [(a, show a) | a <- [minBound .. maxBound]] (== PlainText)
       toPath (slug, phost) =
           do now <- liftIO getCurrentTime
              return $ Right $
@@ -711,7 +708,56 @@ pathForm userId =
 
 adminNewSource :: Acid -> CtrlV Response
 adminNewSource acid@Acid{..} = do
-                appTemplate acid "unfinished" () $ <p>unfinished</p>
+    here <- whereami
+    mUserId <- getUserId acidAuth acidProfile
+    case mUserId of
+          Nothing ->
+            appTemplate acid "Add a Source" () $
+              <%>
+                <h1>You Are Not Logged In</h1>
+              </%>
+          (Just uid) ->
+            appTemplate acid "Add a Source" () $
+              <%>
+                <h1>Add A Source</h1>
+                <% reform (form here) "add" success Nothing (sourceForm uid) %>
+              </%>
+    where
+      success :: Source -> CtrlV Response
+      success ssource = do
+        oldsid <- update (IncrementSourceId)
+        _ <- update (UpdateSource (ssource { sourceId = oldsid }))
+        seeOtherURL (AdminViewSource oldsid)
+
+-- | the 'Form' used for entering a new paste
+sourceForm :: UserId -> CtrlVForm Source
+sourceForm userId =
+    (fieldset $
+       ul $
+            (,,) <$> (li $ label <span>url</span>    ++> errorList ++> (inputText "http://" `transformEither` required))
+                 <*> (li $ label <span>type</span> ++> typeForm)
+                 <*> (li $ label <span>format</span> ++> formatForm)
+                 <* inputSubmit "add source"
+    )  `transformEitherM` toSource
+    where
+      formatForm =
+          select [(a, show a) | a <- [minBound .. maxBound]] (== Pandoc)
+      typeForm =
+          select [(a, show a) | a <- [minBound .. maxBound]] (== DropBoxIndex)
+      toSource (url, typ, fmt) =
+          do now <- liftIO getCurrentTime
+             return $ Right $
+                        (Source { sourceId        = SourceId 0
+                                , sourceURL       = MyURL $ Text.unpack url
+                                , sourceUserId    = userId
+                                , sourceType      = typ
+                                , sourceFormat    = fmt
+                                , sourceRefreshed = now
+                                , sourceAdded     = now
+                                })
+      required txt
+          | Text.null txt = Left "Required"
+          | otherwise     = Right txt
 
 adminNewPage :: Acid -> CtrlV Response
 adminNewPage acid@Acid{..} = do
