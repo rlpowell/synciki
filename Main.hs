@@ -503,6 +503,9 @@ baseAppTemplate Acid{..} ttl moreHdrs bdy = HTML.defaultTemplate ttl <%><link re
                  <div id="logo">^V</div>
                  <ul class="menu">
                   <li><a href=AdminViewAll>Admin View</a></li>
+                  <li><a href=AdminNewPath>Add Path</a></li>
+                  <li><a href=AdminNewPage>Add Page</a></li>
+                  <li><a href=AdminNewSource>Add Source</a></li>
                  </ul>
                    <% do mUserId <- getUserId acidAuth acidProfile
 
