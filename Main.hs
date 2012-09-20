@@ -637,65 +637,39 @@ sourceBody Source{..} =
   , <div class="source-body-delete"><a href=(AdminDeleteSource sourceId)>Delete</a></div>
   ]
 
+makeTable :: Acid -> String -> [GenXML CtrlV'] -> [a] -> (a -> [GenXML CtrlV']) -> GenXML CtrlV'
+makeTable acid title header thingies thingyConverter =
+  case thingies of
+     [] -> <p>There are no <% title %>s yet.</p>
+     _  -> <table>
+            <thead>
+              <tr>
+                <% mapM mkHeader header %>
+              </tr>
+            </thead>
+            <tbody>
+              <% mapM mkTableRow thingies %>
+            </tbody>
+           </table>
+  where
+    mkHeader item = <th><% item %></th>
+    mkTableEntry item = <td><% item %></td>
+    mkTableRow tpath =
+        <tr>
+          <% mapM mkTableEntry $ thingyConverter tpath %>
+        </tr>
+
 pathTable :: Acid -> GenXML CtrlV'
 pathTable acid = do
   ifLoggedInXML acid (<p>You Are Not Logged In</p>) $ \uid -> do
-      paths <- query (GetPathsByUserId uid)
-      case paths of
-         [] -> <p>There are no paths yet.</p>
-         _  -> <table>
-                <thead>
-                  <tr>
-                    <% mapM mkHeader pathHeader %>
-                  </tr>
-                </thead>
-                <tbody>
-                  <% mapM mkTableRow paths %>
-                </tbody>
-               </table>
-    where
-      mkHeader item = <th><% item %></th>
-      mkTableEntry item = <td><% item %></td>
-      mkTableRow tpath =
-          <tr>
-            <% mapM mkTableEntry $ pathBody tpath %>
-          </tr>
+    paths <- query (GetPathsByUserId uid)
+    makeTable acid "path" pathHeader paths pathBody
 
 sourceTable :: Acid -> GenXML CtrlV'
-sourceTable acid@Acid{..} = do
+sourceTable acid = do
   ifLoggedInXML acid (<p>You Are Not Logged In</p>) $ \uid -> do
-      sources <- query (GetSourcesByUserId uid)
-      case sources of
-         [] -> <p>There are no sources yet.</p>
-         _  -> <table>
-                  <thead>
-                   <tr>
-                    <th>url</th>
-                    <th>type</th>
-                    <th>format</th>
-                    <th>date last refreshed</th>
-                    <th>date added</th>
-                    <th>View</th>
-                    <th>Edit</th>
-                    <th>Delete</th>
-                   </tr>
-                  </thead>
-                  <tbody>
-                   <% mapM mkTableRow sources %>
-                  </tbody>
-                 </table>
-    where
-      mkTableRow Source{..} =
-          <tr>
-           <td><% sourceURL       %></td>
-           <td><% sourceType       %></td>
-           <td><% sourceFormat %></td>
-           <td><% sourceRefreshed %></td>
-           <td><% sourceAdded %></td>
-           <td><a href=(AdminViewSource sourceId)>View</a></td>
-           <td><a href=(AdminEditSource sourceId)>Edit</a></td>
-           <td><a href=(AdminDeleteSource sourceId)>Delete</a></td>
-          </tr>
+    sources <- query (GetSourcesByUserId uid)
+    makeTable acid "source" sourceHeader sources sourceBody
 
 ifLoggedInResponse :: Acid -> String -> GenXML CtrlV' -> (UserId -> GenXML CtrlV') -> CtrlV Response
 ifLoggedInResponse acid@Acid{..} title no yes = do
