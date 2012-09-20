@@ -583,7 +583,7 @@ instance EmbedAsChild CtrlV' UTCTime where
 ------------------------------------------------------------------------------
 
 ifLoggedInXML :: Acid -> GenXML CtrlV'-> (UserId -> GenXML CtrlV') -> GenXML CtrlV'
-ifLoggedInXML acid@Acid{..} no yes = do
+ifLoggedInXML Acid{..} no yes = do
   mUserId <- getUserId acidAuth acidProfile
   case mUserId of
     Nothing -> do
@@ -637,10 +637,10 @@ sourceBody Source{..} =
   , <div class="source-body-delete"><a href=(AdminDeleteSource sourceId)>Delete</a></div>
   ]
 
-makeTable :: Acid -> String -> [GenXML CtrlV'] -> [a] -> (a -> [GenXML CtrlV']) -> GenXML CtrlV'
-makeTable acid title header thingies thingyConverter =
+makeTable :: GenXML CtrlV' -> [GenXML CtrlV'] -> [a] -> (a -> [GenXML CtrlV']) -> GenXML CtrlV'
+makeTable ifNotFound header thingies thingyConverter =
   case thingies of
-     [] -> <p>There are no <% title %>s yet.</p>
+     [] -> ifNotFound
      _  -> <table>
             <thead>
               <tr>
@@ -663,13 +663,13 @@ pathTable :: Acid -> GenXML CtrlV'
 pathTable acid = do
   ifLoggedInXML acid (<p>You Are Not Logged In</p>) $ \uid -> do
     paths <- query (GetPathsByUserId uid)
-    makeTable acid "path" pathHeader paths pathBody
+    makeTable (<p>There are no paths yet.</p>) pathHeader paths pathBody
 
 sourceTable :: Acid -> GenXML CtrlV'
 sourceTable acid = do
   ifLoggedInXML acid (<p>You Are Not Logged In</p>) $ \uid -> do
     sources <- query (GetSourcesByUserId uid)
-    makeTable acid "source" sourceHeader sources sourceBody
+    makeTable (<p>There are no sources yet.</p>) sourceHeader sources sourceBody
 
 ifLoggedInResponse :: Acid -> String -> GenXML CtrlV' -> (UserId -> GenXML CtrlV') -> CtrlV Response
 ifLoggedInResponse acid@Acid{..} title no yes = do
@@ -684,7 +684,7 @@ ifLoggedInResponse acid@Acid{..} title no yes = do
 
 adminViewAll :: Acid -> CtrlV Response
 adminViewAll acid@Acid{..} = do
-  ifLoggedInResponse acid "View All" <h1>You Are Not Logged In</h1> $ \uid -> do
+  ifLoggedInResponse acid "View All" <h1>You Are Not Logged In</h1> $ \_ -> do
     <div class="view-all-content">
       <h1>Your Paths</h1>
       <% pathTable acid %>
@@ -692,56 +692,47 @@ adminViewAll acid@Acid{..} = do
       <% sourceTable acid %>
     </div>
 
+makeDL :: [GenXML CtrlV'] -> a -> (a -> [GenXML CtrlV']) -> GenXML CtrlV'
+makeDL header thingy thingyConverter =
+  <div class="dl-body">
+      <dl>
+        <% mapM mkBoth $ zip header $ thingyConverter thingy %>
+      </dl>
+  </div>
+  where
+    mkBoth (headbit, item) = <div class="dl-row"><dt><% headbit %></dt><dd><% item %></dd></div>
+
+ifItemOK :: Maybe a -> (a -> UserId) -> UserId -> GenXML CtrlV' -> (a -> GenXML CtrlV') -> (a -> GenXML CtrlV') -> GenXML CtrlV'
+ifItemOK mItem itemToUserId uid ifNotFound ifNotOwned ifOK =
+    case mItem of
+      Nothing -> do
+        notFound ()
+        ifNotFound
+      (Just item) -> do 
+        if (itemToUserId item) == uid then do
+            ok ()
+            (ifOK item)
+          else
+            (ifNotOwned item)
 
 -- FIXME: Needs to show sources.
---
--- FIXME: It would be nice to somehow de-duplicate this with adminViewAll
 adminViewPath :: Acid -> PathId -> CtrlV Response
 adminViewPath acid pid = do
   ifLoggedInResponse acid "View Path" <h1>You Are Not Logged In</h1> $ \uid -> do
     mPath <- query (GetPath pid)
-    case mPath of
-      Nothing -> do
-        notFound ()
-        <p>Path id <% pid %> could not be found.</p>
-      (Just Path{..}) -> do 
-        if pathUserId == uid then do
-            ok ()
-            <div class="path">
-               <dl class="path-header">
-                  <dt>Path:</dt><dd><a href=(AdminViewPath pid)><% pid %></a></dd>
-                  <dt>Slug:</dt><dd><% pathSlug %></dd>
-                  <dt>Host:</dt><dd><% pathHost %></dd>
-                  <dt>UserId:</dt><dd><% pathUserId %></dd>
-                  <dt>Added:</dt><dd><% pathAdded %></dd>
-               </dl>
-            </div>
-          else
-            <p>Path <% pathSlug %>/<% pid %> is not owned by you.</p>
+    ifItemOK mPath pathUserId uid
+      (<p>Path id <% pid %> could not be found.</p>)
+      (\ipath -> <p>Path <% pathSlug ipath %>/<% pid %> is not owned by you.</p>)
+      (\ipath -> makeDL pathHeader ipath pathBody)
 
--- FIXME: It would be nice to somehow de-duplicate this with adminViewAll
 adminViewSource :: Acid -> SourceId -> CtrlV Response
 adminViewSource acid sid = do
   ifLoggedInResponse acid "View Source" <h1>You Are Not Logged In</h1> $ \uid -> do
     mSource <- query (GetSource sid)
-    case mSource of
-      Nothing -> do
-        notFound ()
-        <p>Source id <% sid %> could not be found.</p>
-      (Just Source{..}) -> do 
-        if sourceUserId == uid then do
-            ok ()
-            <div class="source">
-               <dl class="source-header">
-                  <dt>URL:</dt><dd><% sourceURL %></dd>
-                  <dt>Type:</dt><dd><% sourceType %></dd>
-                  <dt>Format:</dt><dd><% sourceFormat %></dd>
-                  <dt>Refreshed:</dt><dd><% sourceRefreshed %></dd>
-                  <dt>Added:</dt><dd><% sourceAdded %></dd>
-               </dl>
-            </div>
-          else
-            <p>Source <% sourceURL %>/<% sid %> is not owned by you.</p>
+    ifItemOK mSource sourceUserId uid
+      (<p>Source id <% sid %> could not be found.</p>)
+      (\isource -> <p>Source <% sourceURL isource %>/<% sid %> is not owned by you.</p>)
+      (\isource -> makeDL sourceHeader isource sourceBody)
 
 
 adminViewPage :: Acid -> PageId -> CtrlV Response
