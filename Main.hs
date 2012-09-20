@@ -593,6 +593,49 @@ ifLoggedInXML acid@Acid{..} no yes = do
       method GET
       (yes uid)
 
+pathHeader :: [GenXML CtrlV']
+pathHeader =
+  [ <div class="path-header-slug">Slug</div>
+  , <div class="path-header-host">Host</div>
+  , <div class="path-header-added">Date Added</div>
+  , <div class="path-header-view">View</div>
+  , <div class="path-header-edit">Edit</div>
+  , <div class="path-header-delete">Delete</div>
+  ]
+
+pathBody :: Path -> [GenXML CtrlV']
+pathBody Path{..} =
+  [ <div class="path-body-slug"><% pathSlug       %></div>
+  , <div class="path-body-host"><% pathHost       %></div>
+  , <div class="path-body-added"><% pathAdded %></div>
+  , <div class="path-body-view"><a href=(AdminViewPath pathId)>View</a></div>
+  , <div class="path-body-edit"><a href=(AdminEditPath pathId)>Edit</a></div>
+  , <div class="path-body-delete"><a href=(AdminDeletePath pathId)>Delete</a></div>
+  ]
+
+sourceHeader :: [GenXML CtrlV']
+sourceHeader =
+  [ <div class="source-header-url">URL</div>
+  , <div class="source-header-type">Type</div>
+  , <div class="source-header-format">Format</div>
+  , <div class="source-header-refreshed">Date Last Refreshed</div>
+  , <div class="source-header-added">Date Added</div>
+  , <div class="source-header-view">View</div>
+  , <div class="source-header-edit">Edit</div>
+  , <div class="source-header-delete">Delete</div>
+  ]
+
+sourceBody :: Source -> [GenXML CtrlV']
+sourceBody Source{..} =
+  [ <div class="source-body-url"><% sourceURL       %></div>
+  , <div class="source-body-type"><% sourceType       %></div>
+  , <div class="source-body-format"><% sourceFormat       %></div>
+  , <div class="source-body-refreshed"><% sourceRefreshed       %></div>
+  , <div class="source-body-added"><% sourceAdded %></div>
+  , <div class="source-body-view"><a href=(AdminViewSource sourceId)>View</a></div>
+  , <div class="source-body-edit"><a href=(AdminEditSource sourceId)>Edit</a></div>
+  , <div class="source-body-delete"><a href=(AdminDeleteSource sourceId)>Delete</a></div>
+  ]
 
 pathTable :: Acid -> GenXML CtrlV'
 pathTable acid = do
@@ -601,29 +644,21 @@ pathTable acid = do
       case paths of
          [] -> <p>There are no paths yet.</p>
          _  -> <table>
-                  <thead>
-                   <tr>
-                    <th>slug</th>
-                    <th>host</th>
-                    <th>date added</th>
-                    <th>View</th>
-                    <th>Edit</th>
-                    <th>Delete</th>
-                   </tr>
-                  </thead>
-                  <tbody>
-                   <% mapM mkTableRow paths %>
-                  </tbody>
-                 </table>
+                <thead>
+                  <tr>
+                    <% mapM mkHeader pathHeader %>
+                  </tr>
+                </thead>
+                <tbody>
+                  <% mapM mkTableRow paths %>
+                </tbody>
+               </table>
     where
-      mkTableRow Path{..} =
+      mkHeader item = <th><% item %></th>
+      mkTableEntry item = <td><% item %></td>
+      mkTableRow tpath =
           <tr>
-           <td><% pathSlug       %></td>
-           <td><% pathHost       %></td>
-           <td><% pathAdded %></td>
-           <td><a href=(AdminViewPath pathId)>View</a></td>
-           <td><a href=(AdminEditPath pathId)>Edit</a></td>
-           <td><a href=(AdminDeletePath pathId)>Delete</a></td>
+            <% mapM mkTableEntry $ pathBody tpath %>
           </tr>
 
 sourceTable :: Acid -> GenXML CtrlV'
