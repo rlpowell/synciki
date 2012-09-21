@@ -582,16 +582,24 @@ instance EmbedAsChild CtrlV' UTCTime where
 -- Pages
 ------------------------------------------------------------------------------
 
-ifLoggedInXML :: Acid -> GenXML CtrlV'-> (UserId -> GenXML CtrlV') -> GenXML CtrlV'
-ifLoggedInXML Acid{..} no yes = do
+ifLoggedIn :: (Happstack m) => Acid -> m a -> (UserId -> m a) -> m a
+ifLoggedIn Acid{..} no yes = do
   mUserId <- getUserId acidAuth acidProfile
   case mUserId of
     Nothing -> do
-      method GET
       no
     (Just uid) -> do
-      method GET
       (yes uid)
+
+ifLoggedInResponse :: Acid -> String -> GenXML CtrlV' -> (UserId -> GenXML CtrlV') -> CtrlV Response
+ifLoggedInResponse acid@Acid{..} title no yes = do
+  ifLoggedIn acid
+    (appTemplate acid title () $ do 
+      method GET
+      no)
+    $ \uid -> appTemplate acid title () $ do
+        method GET
+        (yes uid)
 
 pathHeader :: [GenXML CtrlV']
 pathHeader =
@@ -661,26 +669,15 @@ makeTable ifNotFound header thingies thingyConverter =
 
 pathTable :: Acid -> GenXML CtrlV'
 pathTable acid = do
-  ifLoggedInXML acid (<p>You Are Not Logged In</p>) $ \uid -> do
+  ifLoggedIn acid (<p>You Are Not Logged In</p>) $ \uid -> do
     paths <- query (GetPathsByUserId uid)
     makeTable (<p>There are no paths yet.</p>) pathHeader paths pathBody
 
 sourceTable :: Acid -> GenXML CtrlV'
 sourceTable acid = do
-  ifLoggedInXML acid (<p>You Are Not Logged In</p>) $ \uid -> do
+  ifLoggedIn acid (<p>You Are Not Logged In</p>) $ \uid -> do
     sources <- query (GetSourcesByUserId uid)
     makeTable (<p>There are no sources yet.</p>) sourceHeader sources sourceBody
-
-ifLoggedInResponse :: Acid -> String -> GenXML CtrlV' -> (UserId -> GenXML CtrlV') -> CtrlV Response
-ifLoggedInResponse acid@Acid{..} title no yes = do
-  mUserId <- getUserId acidAuth acidProfile
-  case mUserId of
-    Nothing -> appTemplate acid title () $ do 
-      method GET
-      no
-    (Just uid) -> appTemplate acid title () $ do
-      method GET
-      (yes uid)
 
 adminViewAll :: Acid -> CtrlV Response
 adminViewAll acid@Acid{..} = do
@@ -702,7 +699,7 @@ makeDL header thingy thingyConverter =
   where
     mkBoth (headbit, item) = <div class="dl-row"><dt><% headbit %></dt><dd><% item %></dd></div>
 
-ifItemOK :: Maybe a -> (a -> UserId) -> UserId -> GenXML CtrlV' -> (a -> GenXML CtrlV') -> (a -> GenXML CtrlV') -> GenXML CtrlV'
+ifItemOK :: (Happstack m) => Maybe a -> (a -> UserId) -> UserId -> m b -> (a -> m b) -> (a -> m b) -> m b
 ifItemOK mItem itemToUserId uid ifNotFound ifNotOwned ifOK =
     case mItem of
       Nothing -> do
@@ -833,43 +830,25 @@ adminEditSource acid@Acid{..} sid = do
 
 adminDeletePath :: Acid -> PathId -> CtrlV Response
 adminDeletePath acid@Acid{..} pid = do
-       mUserId <- getUserId acidAuth acidProfile
-       case mUserId of
-          Nothing ->
-            appTemplate acid "Delete A Path" () $
-              <%>
-                <h1>You Are Not Logged In</h1>
-              </%>
-          (Just uid) ->
-            -- FIXME: Make sure the uid matches!
-            if unPathId pid > 0 then do
-              retval <- update (DeletePath pid)
-              seeOtherURL AdminViewAll
-            else
-              appTemplate acid "Delete a Path" () $
-                <%>
-                  <h1>Invalid Path ID <% pid %></h1>
-                </%>
+    ifLoggedIn acid (appTemplate acid "Delete A Path" () $ <h1>You Are Not Logged In</h1>) $ \uid -> do
+      mPath <- query (GetPath pid)
+      ifItemOK mPath pathUserId uid
+        (appTemplate acid "Delete A Path" () $ <p>Path id <% pid %> could not be found.</p>)
+        (\ipath -> appTemplate acid "Delete A Path" () $ <p>Path <% pathSlug ipath %>/<% pid %> is not owned by you.</p>)
+        (\ipath -> do
+          retval <- update (DeletePath pid)
+          seeOtherURL AdminViewAll)
 
 adminDeleteSource :: Acid -> SourceId -> CtrlV Response
 adminDeleteSource acid@Acid{..} sid = do
-       mUserId <- getUserId acidAuth acidProfile
-       case mUserId of
-          Nothing ->
-            appTemplate acid "Delete A Source" () $
-              <%>
-                <h1>You Are Not Logged In</h1>
-              </%>
-          (Just uid) ->
-            -- FIXME: Make sure the uid matches!
-            if unSourceId sid > 0 then do
-              retval <- update (DeleteSource sid)
-              seeOtherURL AdminViewAll
-            else
-              appTemplate acid "Delete a Source" () $
-                <%>
-                  <h1>Invalid Source ID <% sid %></h1>
-                </%>
+    ifLoggedIn acid (appTemplate acid "Delete A Source" () $ <h1>You Are Not Logged In</h1>) $ \uid -> do
+      mSource <- query (GetSource sid)
+      ifItemOK mSource sourceUserId uid
+        (appTemplate acid "Delete A Path" () $ <p>Source id <% sid %> could not be found.</p>)
+        (\isource -> appTemplate acid "Delete A Path" () $ <p>Source <% sourceURL isource %>/<% sid %> is not owned by you.</p>)
+        (\isource -> do
+          retval <- update (DeleteSource sid)
+          seeOtherURL AdminViewAll)
 
 
 -- | convert a content page to HTML. We currently only support
