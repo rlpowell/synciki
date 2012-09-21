@@ -735,18 +735,17 @@ adminViewPage acid pid = do
                 appTemplate acid "unfinished" () $ <p>unfinished</p>
 
 -- | the 'Form' used for entering a new paste
-pathForm :: UserId -> CtrlVForm Path
-pathForm userId = do
-    sources <- query (GetSourcesByUserId userId)
+pathForm :: UserId -> [Source] -> CtrlVForm Path
+pathForm userId sources = do
     (fieldset $
        ul $
-            (,) <$> (li $ label <span>slug</span>  ++> (inputText "" `transformEither` required) <++ errorList)
-                <*> (li $ label <span>host</span>   ++> (inputText "" `transformEither` required) <++ errorList)
-                <*> (li $ label <span>sources</span> ++> sourcesForm <++ errorList)
-                <* inputSubmit "add path"
+            (,,) <$> (li $ label <span>slug</span>  ++> (inputText "" `transformEither` required) <++ errorList)
+                 <*> (li $ label <span>host</span>   ++> (inputText "" `transformEither` required) <++ errorList)
+                 <*> (li $ label <span>sources</span> ++> sourcesForm <++ errorList)
+                 <* inputSubmit "add path"
       )  `transformEitherM` toPath
     where
-      sourcesForm = selectMultiple [(source, show $ sourceURL source) | source <- sources] (\_ -> False)
+      sourcesForm = selectMultiple [(sourceId source, show $ sourceURL source) | source <- sources] (\_ -> False)
       toPath (slug, phost, selSources) =
           do now <- liftIO getCurrentTime
              return $ Right $
@@ -765,9 +764,10 @@ adminNewPath :: Acid -> CtrlV Response
 adminNewPath acid@Acid{..} = do
     here <- whereami
     ifLoggedInResponse acid "Add A Path" <h1>You Are Not Logged In</h1> $ \uid -> do
+      sources <- query (GetSourcesByUserId uid)
       <div class="add-path-content">
         <h1>Add A Path</h1>
-        <% reform (form here) "add" success Nothing (pathForm uid) %>
+        <% reform (form here) "add" success Nothing (pathForm uid sources) %>
       </div>
     where
       success :: Path -> CtrlV Response
