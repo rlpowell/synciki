@@ -736,22 +736,25 @@ adminViewPage acid pid = do
 
 -- | the 'Form' used for entering a new paste
 pathForm :: UserId -> CtrlVForm Path
-pathForm userId =
+pathForm userId = do
+    sources <- query (GetSourcesByUserId userId)
     (fieldset $
        ul $
             (,) <$> (li $ label <span>slug</span>  ++> (inputText "" `transformEither` required) <++ errorList)
                 <*> (li $ label <span>host</span>   ++> (inputText "" `transformEither` required) <++ errorList)
+                <*> (li $ label <span>sources</span> ++> sourcesForm <++ errorList)
                 <* inputSubmit "add path"
-    )  `transformEitherM` toPath
+      )  `transformEitherM` toPath
     where
-      toPath (slug, phost) =
+      sourcesForm = selectMultiple [(source, show $ sourceURL source) | source <- sources] (\_ -> False)
+      toPath (slug, phost, selSources) =
           do now <- liftIO getCurrentTime
              return $ Right $
                         (Path { pathId       = PathId 0
                               , pathSlug     = PathSlug $ Text.unpack slug
                               , pathHost     = PathHost $ Text.unpack phost
                               , pathUserId  = userId
-                              , pathSources  = []
+                              , pathSources  = selSources
                               , pathAdded   = now
                               })
       required txt
