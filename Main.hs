@@ -595,10 +595,8 @@ ifLoggedInResponse :: Acid -> String -> GenXML CtrlV' -> (UserId -> GenXML CtrlV
 ifLoggedInResponse acid@Acid{..} title no yes = do
   ifLoggedIn acid
     (appTemplate acid title () $ do 
-      method GET
       no)
     $ \uid -> appTemplate acid title () $ do
-        method GET
         (yes uid)
 
 pathHeader :: [GenXML CtrlV']
@@ -819,6 +817,7 @@ adminNewSource acid@Acid{..} = do
         oldsid <- update (IncrementSourceId)
         _ <- update (UpdateSource (ssource { sourceId = oldsid }))
         seeOtherURL (AdminViewSource oldsid)
+
 adminEditPath :: Acid -> PathId -> CtrlV Response
 adminEditPath acid@Acid{..} pid = do
                 appTemplate acid "unfinished" () $ <p>unfinished</p>
