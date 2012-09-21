@@ -255,6 +255,11 @@ deletePath pid = do
 getSource :: SourceId -> Query CtrlVState (Maybe Source)
 getSource sid = getOne . getEQ sid . sources <$> ask
 
+getSources :: [SourceId] -> Query CtrlVState [Source]
+getSources sids = do
+  cstate <- ask
+  return $ IxSet.toList $ (sources cstate) IxSet.@+ sids
+
 getSourceByURL :: MyURL -> Query CtrlVState (Maybe Source)
 getSourceByURL url = getOne . getEQ url . sources <$> ask
 
@@ -344,6 +349,7 @@ $(makeAcidic ''CtrlVState
    , 'updatePath
    , 'deletePath
    , 'getSource
+   , 'getSources
    , 'getSourceByURL
    , 'getSourcesByUserId
    , 'incrementSourceId
@@ -718,7 +724,15 @@ adminViewPath acid pid = do
     ifItemOK mPath pathUserId uid
       (<p>Path id <% pid %> could not be found.</p>)
       (\ipath -> <p>Path <% pathSlug ipath %>/<% pid %> is not owned by you.</p>)
-      (\ipath -> makeDL pathHeader ipath pathBody)
+      (\ipath -> do
+        sources <- query (GetSources $ pathSources ipath)
+        <div>
+          <h1>Path</h1>
+          <% makeDL pathHeader ipath pathBody %>
+          <h1>Path's Sources</h1>
+          <% makeTable (<p>There are no sources associated with this path.</p>) sourceHeader sources sourceBody %>
+        </div>
+        )
 
 adminViewSource :: Acid -> SourceId -> CtrlV Response
 adminViewSource acid sid = do
@@ -745,7 +759,7 @@ pathForm userId sources = do
                  <* inputSubmit "add path"
       )  `transformEitherM` toPath
     where
-      sourcesForm = selectMultiple [(sourceId source, show $ sourceURL source) | source <- sources] (\_ -> False)
+      sourcesForm = selectMultiple [(sourceId source, show $ unMyURL $ sourceURL source) | source <- sources] (\_ -> False)
       toPath (slug, phost, selSources) =
           do now <- liftIO getCurrentTime
              return $ Right $
