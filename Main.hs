@@ -736,21 +736,6 @@ adminViewPage :: Acid -> PageId -> CtrlV Response
 adminViewPage acid pid = do
                 appTemplate acid "unfinished" () $ <p>unfinished</p>
 
-adminNewPath :: Acid -> CtrlV Response
-adminNewPath acid@Acid{..} = do
-    here <- whereami
-    ifLoggedInResponse acid "Add A Path" <h1>You Are Not Logged In</h1> $ \uid -> do
-      <div class="add-path-content">
-        <h1>Add A Path</h1>
-        <% reform (form here) "add" success Nothing (pathForm uid) %>
-      </div>
-    where
-      success :: Path -> CtrlV Response
-      success spath = do
-        oldpid <- update (IncrementPathId)
-        _ <- update (UpdatePath (spath { pathId = oldpid }))
-        seeOtherURL (AdminViewPath oldpid)
-
 -- | the 'Form' used for entering a new paste
 pathForm :: UserId -> CtrlVForm Path
 pathForm userId =
@@ -775,20 +760,20 @@ pathForm userId =
           | Text.null txt = Left "Required"
           | otherwise     = Right txt
 
-adminNewSource :: Acid -> CtrlV Response
-adminNewSource acid@Acid{..} = do
+adminNewPath :: Acid -> CtrlV Response
+adminNewPath acid@Acid{..} = do
     here <- whereami
-    ifLoggedInResponse acid "Add A Source" <h1>You Are Not Logged In</h1> $ \uid -> do
-      <div class="add-source-content">
-        <h1>Add A Source</h1>
-        <% reform (form here) "add" success Nothing (sourceForm uid) %>
+    ifLoggedInResponse acid "Add A Path" <h1>You Are Not Logged In</h1> $ \uid -> do
+      <div class="add-path-content">
+        <h1>Add A Path</h1>
+        <% reform (form here) "add" success Nothing (pathForm uid) %>
       </div>
     where
-      success :: Source -> CtrlV Response
-      success ssource = do
-        oldsid <- update (IncrementSourceId)
-        _ <- update (UpdateSource (ssource { sourceId = oldsid }))
-        seeOtherURL (AdminViewSource oldsid)
+      success :: Path -> CtrlV Response
+      success spath = do
+        oldpid <- update (IncrementPathId)
+        _ <- update (UpdatePath (spath { pathId = oldpid }))
+        seeOtherURL (AdminViewPath oldpid)
 
 -- | the 'Form' used for entering a new paste
 sourceForm :: UserId -> CtrlVForm Source
@@ -820,6 +805,20 @@ sourceForm userId =
           | Text.null txt = Left "Required"
           | otherwise     = Right txt
 
+adminNewSource :: Acid -> CtrlV Response
+adminNewSource acid@Acid{..} = do
+    here <- whereami
+    ifLoggedInResponse acid "Add A Source" <h1>You Are Not Logged In</h1> $ \uid -> do
+      <div class="add-source-content">
+        <h1>Add A Source</h1>
+        <% reform (form here) "add" success Nothing (sourceForm uid) %>
+      </div>
+    where
+      success :: Source -> CtrlV Response
+      success ssource = do
+        oldsid <- update (IncrementSourceId)
+        _ <- update (UpdateSource (ssource { sourceId = oldsid }))
+        seeOtherURL (AdminViewSource oldsid)
 adminEditPath :: Acid -> PathId -> CtrlV Response
 adminEditPath acid@Acid{..} pid = do
                 appTemplate acid "unfinished" () $ <p>unfinished</p>
