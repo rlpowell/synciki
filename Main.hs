@@ -733,7 +733,7 @@ adminViewAll acid@Acid{..} = do
       <h1>Your Sources</h1>
       <% sourceTable acid %>
       <h1>Your Pages</h1>
-      <% sourceTable acid %>
+      <% pageTable acid %>
     </div>
 
 makeDL :: [GenXML CtrlV'] -> a -> (a -> [GenXML CtrlV']) -> GenXML CtrlV'
