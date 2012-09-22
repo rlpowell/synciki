@@ -114,6 +114,10 @@ newtype PathHost = PathHost { unPathHost :: String }
     deriving (Eq, Ord, Read, Show, Data, Typeable, SafeCopy)
 $(derivePathInfo ''PathHost)
 
+-- String type needed for indexing
+newtype PageSlug = PageSlug { unPageSlug :: String }
+    deriving (Eq, Ord, Read, Show, Data, Typeable, SafeCopy)
+$(derivePathInfo ''PageSlug)
 
 
 data Path = Path
@@ -144,6 +148,7 @@ data Source = Source
   , sourceUserId    :: UserId
   , sourceType      :: SourceType
   , sourceFormat    :: Format
+  , sourceHome      :: PageSlug    -- FIXME: make a form that allows selection of this from the cached pages
   , sourceRefreshed :: UTCTime
   , sourceAdded     :: UTCTime
   }
@@ -155,11 +160,6 @@ instance Indexable Source where
         ixSet [ ixGen (Proxy :: Proxy SourceId)
               , ixFun $ (:[]) . sourceUserId
               ]
-
--- String type needed for indexing
-newtype PageSlug = PageSlug { unPageSlug :: String }
-    deriving (Eq, Ord, Read, Show, Data, Typeable, SafeCopy)
-$(derivePathInfo ''PageSlug)
 
 -- Each Source is trolled for a list of files it contains, and then
 -- various data about them is cached in the Page structure.
@@ -381,6 +381,7 @@ data Route
     | AdminEditSource SourceId
     | AdminDeletePath PathId
     | AdminDeleteSource SourceId
+    | AdminRefreshSource SourceId
     | ViewPage PathHost PathSlug PageSlug
     | CSS
     | U_AuthProfile AuthProfileURL
@@ -407,6 +408,7 @@ route acid@Acid{..} baseURL url =
       (AdminEditSource sid)              -> adminEditSource acid sid
       (AdminDeletePath pid)              -> adminDeletePath acid pid
       (AdminDeleteSource sid)            -> adminDeleteSource acid sid
+      (AdminRefreshSource sid)           -> adminRefreshSource acid sid
       (ViewPage phost pathSlug pageSlug) -> viewPage acid phost pathSlug pageSlug
       CSS                                -> serveFile (asContentType "text/css") "style.css"
       -- FIXME: replace the AdminViewAll thing here with "go back to
@@ -633,6 +635,7 @@ sourceHeader =
   , <div class="source-header-refreshed">Date Last Refreshed</div>
   , <div class="source-header-added">Date Added</div>
   , <div class="source-header-view">View</div>
+  , <div class="source-header-view">Refresh</div>
   , <div class="source-header-edit">Edit</div>
   , <div class="source-header-delete">Delete</div>
   ]
@@ -645,6 +648,7 @@ sourceBody Source{..} =
   , <div class="source-body-refreshed"><% sourceRefreshed       %></div>
   , <div class="source-body-added"><% sourceAdded %></div>
   , <div class="source-body-view"><a href=(AdminViewSource sourceId)>View</a></div>
+  , <div class="source-body-edit"><a href=(AdminRefreshSource sourceId)>Refresh</a></div>
   , <div class="source-body-edit"><a href=(AdminEditSource sourceId)>Edit</a></div>
   , <div class="source-body-delete"><a href=(AdminDeleteSource sourceId)>Delete</a></div>
   ]
@@ -813,6 +817,7 @@ sourceForm userId =
                                 , sourceUserId    = userId
                                 , sourceType      = typ
                                 , sourceFormat    = fmt
+                                , sourceHome      = PageSlug ""
                                 , sourceRefreshed = now
                                 , sourceAdded     = now
                                 })
@@ -833,7 +838,7 @@ adminNewSource acid@Acid{..} = do
       success ssource = do
         oldsid <- update (IncrementSourceId)
         _ <- update (UpdateSource (ssource { sourceId = oldsid }))
-        seeOtherURL (AdminViewSource oldsid)
+        seeOtherURL (AdminRefreshSource oldsid)
 
 adminEditPath :: Acid -> PathId -> CtrlV Response
 adminEditPath acid@Acid{..} pid = do
@@ -865,18 +870,23 @@ adminDeleteSource acid@Acid{..} sid = do
           retval <- update (DeleteSource sid)
           seeOtherURL AdminViewAll)
 
+adminRefreshSource :: Acid -> SourceId -> CtrlV Response
+adminRefreshSource acid@Acid{..} sid = do
+    ifLoggedIn acid (appTemplate acid "Refresh A Source" () $ <h1>You Are Not Logged In</h1>) $ \uid -> do
+      seeOtherURL (AdminViewSource sid)
+
 
 -- | convert a content page to HTML. We currently only support
 -- 'PlainText', but eventually it might do syntax hightlighting,
 -- markdown, etc.
---
+
 -- Note that we do not have to worry about escaping the txt
--- value.. that is done automatically by HSP.
--- formatPage :: Format -> Text -> CtrlV XML
--- formatPage PlainText txt =
---     <pre>plain: <% txt %></pre>
--- formatPage Pandoc txt =
---     <pre>pandoc: <% txt %></pre>
+-- value, that is done automatically by HSP.
+formatPage :: Format -> Text -> CtrlV XML
+formatPage PlainText txt =
+    <pre>plain: <% txt %></pre>
+formatPage Pandoc txt =
+    <pre>pandoc: <% txt %></pre>
 
 -- BEGIN dropbox stuff
 
