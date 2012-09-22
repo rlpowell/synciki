@@ -40,6 +40,10 @@ import qualified Data.ByteString as BS
 import Text.Regex.PCRE.Rex -- also needs TemplateHaskell, QuasiQuotes, ViewPatterns
 import Data.List
 
+-- Debugging
+import Text.Show.Pretty
+import Debug.Trace
+-- import Debug.Trace.Helpers
 
 ------------------------------------------------------------------------------
 -- Model
@@ -664,7 +668,6 @@ pageHeader =
   , <div class="page-header-title">Title</div>
   , <div class="page-header-format">Format</div>
   , <div class="page-header-tags">Tags</div>
-  , <div class="page-header-content">Content</div>
   , <div class="page-header-view">View</div>
   , <div class="page-header-refresh">Refresh</div>
   ]
@@ -677,7 +680,6 @@ pageBody Page{..} =
   , <div class="page-body-title"><% pageTitle       %></div>
   , <div class="page-body-format"><% pageFormat       %></div>
   , <div class="page-body-tags"><% pageTags       %></div>
-  , <div class="page-body-content"><% formatPage pageFormat pageContent %></div>
   , <div class="page-body-view"><a href=(AdminViewPage pageId)>View</a></div>
   , <div class="page-body-refresh"><a href=(AdminRefreshSource pageSourceId)>Refresh</a></div>
   ]
@@ -716,6 +718,12 @@ sourceTable acid = do
     sources <- query (GetSourcesByUserId uid)
     makeTable (<p>There are no sources yet.</p>) sourceHeader sources sourceBody
 
+pageTable :: Acid -> GenXML CtrlV'
+pageTable acid = do
+  ifLoggedIn acid (<p>You Are Not Logged In</p>) $ \uid -> do
+    pages <- query (GetPagesByUserId uid)
+    makeTable (<p>There are no pages yet.</p>) pageHeader pages pageBody
+
 adminViewAll :: Acid -> CtrlV Response
 adminViewAll acid@Acid{..} = do
   ifLoggedInResponse acid "View All" <h1>You Are Not Logged In</h1> $ \_ -> do
@@ -723,6 +731,8 @@ adminViewAll acid@Acid{..} = do
       <h1>Your Paths</h1>
       <% pathTable acid %>
       <h1>Your Sources</h1>
+      <% sourceTable acid %>
+      <h1>Your Pages</h1>
       <% sourceTable acid %>
     </div>
 
@@ -749,7 +759,7 @@ ifItemOK mItem itemToUserId uid ifNotFound ifNotOwned ifOK =
           else
             (ifNotOwned item)
 
--- FIXME: Needs to show sources.
+-- FIXME: Needs to show pages
 adminViewPath :: Acid -> PathId -> CtrlV Response
 adminViewPath acid pid = do
   ifLoggedInResponse acid "View Path" <h1>You Are Not Logged In</h1> $ \uid -> do
@@ -767,6 +777,7 @@ adminViewPath acid pid = do
         </div>
         )
 
+-- FIXME: Needs to show pages
 adminViewSource :: Acid -> SourceId -> CtrlV Response
 adminViewSource acid sid = do
   ifLoggedInResponse acid "View Source" <h1>You Are Not Logged In</h1> $ \uid -> do
@@ -784,7 +795,13 @@ adminViewPage acid pid = do
     ifItemOK mPage pageUserId uid
       (<p>Page id <% pid %> could not be found.</p>)
       (\ipage -> <p>Page <% pageSlug ipage %>/<% pid %> is not owned by you.</p>)
-      (\ipage -> makeDL pageHeader ipage pageBody)
+      (\ipage -> do
+        <div>
+          <h1>Path</h1>
+          <% makeDL pageHeader ipage pageBody %>
+          <h1>Content</h1>
+          <% formatPage (pageFormat ipage) (pageContent ipage) %>
+        </div>)
 
 
 -- | the 'Form' used for entering a new paste
@@ -958,13 +975,24 @@ dropBoxIndexSourceToPages source = do
 dropBoxIndexSourceToURLs :: Source -> CtrlV [MyURL]
 dropBoxIndexSourceToURLs Source{..} = do
   page <- liftIO $ urlToHXT $ unMyURL sourceURL
-  -- Most of this next line is from
-  -- http://adit.io/posts/2012-03-10-building_a_concurrent_web_scraper_with_haskell.html
+  -- We want the href attributes of things like this:
+  --
+  -- <li class="browse-file list-view-cols">
+  --   <div class="filename-col">
+  --     <a href="https://www.dropbox.com/sh/wgig8uhogr1w5h4/xHyjN0pJtb/synciki/publictest1.txt" [snip]
+  --
+  -- So, all the li's with a browse-file class, their a children,
+  -- the hrefs (then we have to de-dupe later with nub)
   hrefs <- liftIO $ HXT.runX $ page
+                  HXT.>>> css "li"
+                  HXT.>>> HXT.hasAttrValue "class" (\classes -> elem "browse-file" $ words classes)
                   HXT.>>> css "a" 
                   HXT.>>> HXT.getAttrValue "href"
-  return $ map (\a -> MyURL (a ++ "?dl=1")) hrefs
+  -- Debugging:
+  -- trace ("hrefs: " ++ (show $ ppDoc hrefs)) $ return $ map (\a -> MyURL (a ++ "?dl=1")) $ nub hrefs
 
+  -- "?dl=1" gives us the URL to download the raw text of the file
+  return $ map (\a -> MyURL (a ++ "?dl=1")) $ nub hrefs
 
 -- | convert a content page to HTML. We currently only support
 -- 'PlainText', but eventually it might do syntax hightlighting,

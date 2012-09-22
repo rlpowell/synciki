@@ -30,3 +30,4 @@ Executable ControlV
                      , hxt
                      , bytestring
                      , rex
+                     , pretty-show
