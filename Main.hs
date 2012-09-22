@@ -6,6 +6,7 @@ import Happstack.Foundation
 import qualified Data.IxSet as IxSet
 import Data.IxSet (IxSet, Indexable, Proxy(..), getEQ, getOne, ixSet, ixFun, ixGen)
 import Data.Text  (Text)
+import Data.Text.Encoding as DTE
 import qualified Data.Text as Text
 import Data.Time.Clock (UTCTime, getCurrentTime)
 import Data.Maybe
@@ -35,6 +36,7 @@ import qualified Network.HTTP.Conduit as NHC
 import qualified Text.XML.HXT.Core as HXT
 import Data.Tree.NTree.TypeDefs
 import qualified Data.ByteString.Lazy.Char8 as LC
+import qualified Data.ByteString as BS
 import Text.Regex.PCRE.Rex -- also needs TemplateHaskell, QuasiQuotes, ViewPatterns
 import Data.List
 
@@ -168,11 +170,12 @@ data Page = Page
   , pageSourceId  :: SourceId   -- UNIQUE IN COMBINATION WITH slug. FIXME: unenforced.
   , pageUserId    :: UserId
   , pageURL       :: MyURL
-  , title         :: String
+  , pageTitle     :: String
+  , pageFormat    :: Format     -- Duplicated from the source
   , pageSlug      :: PageSlug   -- UNIQUE IN COMBINATION WITH sourceid. FIXME: unenforced.
                                 -- FIXME: Needs creation
-  , tags          :: [String]   -- FIXME: Needs validation; perhaps on source reload or admin view?
-  , content       :: Text       -- This might be a memory problem later.
+  , pageTags      :: [String]   -- FIXME: Needs validation; perhaps on source reload or admin view?
+  , pageContent   :: Text       -- This might be a memory problem later.
   }
   deriving (Eq, Ord, Read, Show, Data, Typeable)
 $(deriveSafeCopy 0 'base ''Page)
@@ -653,6 +656,32 @@ sourceBody Source{..} =
   , <div class="source-body-delete"><a href=(AdminDeleteSource sourceId)>Delete</a></div>
   ]
 
+pageHeader :: [GenXML CtrlV']
+pageHeader =
+  [ <div class="page-header-url">URL</div>
+  , <div class="page-header-source">Source</div>
+  , <div class="page-header-slug">Slug</div>
+  , <div class="page-header-title">Title</div>
+  , <div class="page-header-format">Format</div>
+  , <div class="page-header-tags">Tags</div>
+  , <div class="page-header-content">Content</div>
+  , <div class="page-header-view">View</div>
+  , <div class="page-header-refresh">Refresh</div>
+  ]
+
+pageBody :: Page -> [GenXML CtrlV']
+pageBody Page{..} =
+  [ <div class="page-body-url"><% pageURL       %></div>
+  , <div class="page-body-source"><a href=(AdminViewSource pageSourceId)>View Source</a></div>
+  , <div class="page-body-slug"><% pageSlug       %></div>
+  , <div class="page-body-title"><% pageTitle       %></div>
+  , <div class="page-body-format"><% pageFormat       %></div>
+  , <div class="page-body-tags"><% pageTags       %></div>
+  , <div class="page-body-content"><% formatPage pageFormat pageContent %></div>
+  , <div class="page-body-view"><a href=(AdminViewPage pageId)>View</a></div>
+  , <div class="page-body-refresh"><a href=(AdminRefreshSource pageSourceId)>Refresh</a></div>
+  ]
+
 makeTable :: GenXML CtrlV' -> [GenXML CtrlV'] -> [a] -> (a -> [GenXML CtrlV']) -> GenXML CtrlV'
 makeTable ifNotFound header thingies thingyConverter =
   case thingies of
@@ -750,7 +779,13 @@ adminViewSource acid sid = do
 
 adminViewPage :: Acid -> PageId -> CtrlV Response
 adminViewPage acid pid = do
-                appTemplate acid "unfinished" () $ <p>unfinished</p>
+  ifLoggedInResponse acid "View Page" <h1>You Are Not Logged In</h1> $ \uid -> do
+    mPage <- query (GetPage pid)
+    ifItemOK mPage pageUserId uid
+      (<p>Page id <% pid %> could not be found.</p>)
+      (\ipage -> <p>Page <% pageSlug ipage %>/<% pid %> is not owned by you.</p>)
+      (\ipage -> makeDL pageHeader ipage pageBody)
+
 
 -- | the 'Form' used for entering a new paste
 pathForm :: UserId -> [Source] -> CtrlVForm Path
@@ -855,8 +890,8 @@ adminDeletePath acid@Acid{..} pid = do
       ifItemOK mPath pathUserId uid
         (appTemplate acid "Delete A Path" () $ <p>Path id <% pid %> could not be found.</p>)
         (\ipath -> appTemplate acid "Delete A Path" () $ <p>Path <% pathSlug ipath %>/<% pid %> is not owned by you.</p>)
-        (\ipath -> do
-          retval <- update (DeletePath pid)
+        (\_ -> do
+          _ <- update (DeletePath pid)
           seeOtherURL AdminViewAll)
 
 adminDeleteSource :: Acid -> SourceId -> CtrlV Response
@@ -864,16 +899,71 @@ adminDeleteSource acid@Acid{..} sid = do
     ifLoggedIn acid (appTemplate acid "Delete A Source" () $ <h1>You Are Not Logged In</h1>) $ \uid -> do
       mSource <- query (GetSource sid)
       ifItemOK mSource sourceUserId uid
-        (appTemplate acid "Delete A Path" () $ <p>Source id <% sid %> could not be found.</p>)
-        (\isource -> appTemplate acid "Delete A Path" () $ <p>Source <% sourceURL isource %>/<% sid %> is not owned by you.</p>)
-        (\isource -> do
-          retval <- update (DeleteSource sid)
+        (appTemplate acid "Delete A Source" () $ <p>Source id <% sid %> could not be found.</p>)
+        (\isource -> appTemplate acid "Delete A Source" () $ <p>Source <% sourceURL isource %>/<% sid %> is not owned by you.</p>)
+        (\_ -> do
+          _ <- update (DeleteSource sid)
           seeOtherURL AdminViewAll)
 
 adminRefreshSource :: Acid -> SourceId -> CtrlV Response
 adminRefreshSource acid@Acid{..} sid = do
     ifLoggedIn acid (appTemplate acid "Refresh A Source" () $ <h1>You Are Not Logged In</h1>) $ \uid -> do
-      seeOtherURL (AdminViewSource sid)
+      mSource <- query (GetSource sid)
+      ifItemOK mSource sourceUserId uid
+        (appTemplate acid "Refresh A Source" () $ <p>Source id <% sid %> could not be found.</p>)
+        (\isource -> appTemplate acid "Refresh A Source" () $ <p>Source <% sourceURL isource %>/<% sid %> is not owned by you.</p>)
+        (\isource -> do
+          case (sourceType isource) of
+            DropBoxIndex -> do
+              _ <- dropBoxIndexSourceToPages isource
+              seeOtherURL (AdminViewSource sid)
+            _ -> error "Can't refresh that type!")
+
+sourceAndURLsToPages :: Source -> [MyURL] -> CtrlV [PageId]
+sourceAndURLsToPages Source{..} urls =
+  mapM doPage urls
+  where
+    doPage :: MyURL -> CtrlV PageId
+    doPage url = do
+      urlContentRaw <- NHC.simpleHttp $ unMyURL url
+      let urlContent = DTE.decodeUtf8 $ BS.concat $ LC.toChunks urlContentRaw 
+      -- FIXME: holy shit
+      let slug = PageSlug $ Text.unpack $ head $ Text.words urlContent
+      let newpage = Page { pageId       = PageId 0
+                         , pageSourceId = sourceId
+                         , pageUserId   = sourceUserId
+                         , pageURL      = url
+                         , pageTitle    = unPageSlug slug -- FIXME: temp
+                         , pageFormat   = sourceFormat
+                         , pageSlug     = slug
+                         , pageTags     = [] -- FIXME: temp
+                         , pageContent  = urlContent
+                         }
+      mPage <- query (GetPageBySourceIdsAndSlug [sourceId] slug)
+      case mPage of
+        Nothing -> do
+          oldpid <- update (IncrementPageId)
+          _ <- update (UpdatePage (newpage { pageId = oldpid }))
+          return oldpid
+        (Just Page{..}) -> do
+          _ <- update (UpdatePage (newpage { pageId = pageId }))
+          return pageId
+
+
+dropBoxIndexSourceToPages :: Source -> CtrlV [PageId]
+dropBoxIndexSourceToPages source = do
+  urls <- dropBoxIndexSourceToURLs source
+  sourceAndURLsToPages source urls
+
+dropBoxIndexSourceToURLs :: Source -> CtrlV [MyURL]
+dropBoxIndexSourceToURLs Source{..} = do
+  page <- liftIO $ urlToHXT $ unMyURL sourceURL
+  -- Most of this next line is from
+  -- http://adit.io/posts/2012-03-10-building_a_concurrent_web_scraper_with_haskell.html
+  hrefs <- liftIO $ HXT.runX $ page
+                  HXT.>>> css "a" 
+                  HXT.>>> HXT.getAttrValue "href"
+  return $ map (\a -> MyURL (a ++ "?dl=1")) hrefs
 
 
 -- | convert a content page to HTML. We currently only support
@@ -882,7 +972,7 @@ adminRefreshSource acid@Acid{..} sid = do
 
 -- Note that we do not have to worry about escaping the txt
 -- value, that is done automatically by HSP.
-formatPage :: Format -> Text -> CtrlV XML
+formatPage :: Format -> Text -> GenXML CtrlV'
 formatPage PlainText txt =
     <pre>plain: <% txt %></pre>
 formatPage Pandoc txt =
@@ -901,8 +991,8 @@ css tag = HXT.multi (HXT.hasName tag)
 -- 
 -- FIXME: There's probably all *kinds* of error handling we're not
 -- doing here; what does NHC.simpleHttp return on error?
-webPageGet :: String -> IO (HXT.IOSArrow HXT.XmlTree (NTree HXT.XNode))
-webPageGet pageUrl = do
+urlToHXT :: String -> IO (HXT.IOSArrow HXT.XmlTree (NTree HXT.XNode))
+urlToHXT pageUrl = do
   contents <- NHC.simpleHttp pageUrl
   return $ HXT.readString [HXT.withParseHTML HXT.yes, HXT.withWarnings HXT.no] (LC.unpack contents)
 
@@ -917,10 +1007,10 @@ fullFilePair = [rex|^(?{ }.*/(?{ }[^/.]+)\.txt)$|]
 -- is completely wrong; it should be extracted by parsing the file.
 -- 
 -- FIXME: There's probably all *kinds* of error handling we're not
--- doing here; what does webPageGet return on error?
+-- doing here; what does urlToHXT return on error?
 dropBoxPathList :: MyURL -> IO [(String, String)]
 dropBoxPathList pageUrl = do
-  page <- liftIO $ webPageGet $ unMyURL pageUrl
+  page <- liftIO $ urlToHXT $ unMyURL pageUrl
   -- Most of this next line is from
   -- http://adit.io/posts/2012-03-10-building_a_concurrent_web_scraper_with_haskell.html
   hrefs <- HXT.runX $ page
@@ -934,7 +1024,7 @@ dropBoxPathList pageUrl = do
  -- -- information therefrom.
  -- --
  -- -- FIXME: There's probably all *kinds* of error handling we're not
- -- -- doing here; fix this when we fix dropBoxPathList and webPageGet 
+ -- -- doing here; fix this when we fix dropBoxPathList and urlToHXT 
  -- dropBoxListPageToCFs :: Component -> CtrlV [(ComponentFileIndex, MyURL)]
  -- dropBoxListPageToCFs component@Component{..} = do
  --   entries <- liftIO $ dropBoxPathList url
