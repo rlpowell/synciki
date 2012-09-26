@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveDataTypeable, FlexibleContexts, FlexibleInstances, GeneralizedNewtypeDeriving, MultiParamTypeClasses, OverloadedStrings, RecordWildCards, TemplateHaskell, TypeFamilies, TypeSynonymInstances, OverloadedStrings, QuasiQuotes, ViewPatterns #-}
+{-# LANGUAGE DeriveDataTypeable, FlexibleContexts, FlexibleInstances, GeneralizedNewtypeDeriving, MultiParamTypeClasses, OverloadedStrings, RecordWildCards, TemplateHaskell, TypeFamilies, TypeSynonymInstances, OverloadedStrings #-}
 {-# OPTIONS_GHC -F -pgmFtrhsx #-}
 module Main where
 
@@ -11,6 +11,9 @@ import qualified Data.Text as Text
 import Data.Time.Clock (UTCTime, getCurrentTime)
 import Data.Maybe
 import HSP
+import qualified Data.Map as Map
+import Data.Char
+import Data.List.Split
 
 -- If we start doing complicated URL manipulation, this would be
 -- valuable, but I think String (or re-branded String) is fine for now.
@@ -37,7 +40,7 @@ import qualified Text.XML.HXT.Core as HXT
 import Data.Tree.NTree.TypeDefs
 import qualified Data.ByteString.Lazy.Char8 as LC
 import qualified Data.ByteString as BS
-import Text.Regex.PCRE.Rex -- also needs TemplateHaskell, QuasiQuotes, ViewPatterns
+import Text.RegexPR
 import Data.List
 
 -- Debugging
@@ -179,7 +182,6 @@ data Page = Page
   , pageSlug      :: PageSlug   -- UNIQUE IN COMBINATION WITH sourceid. FIXME: unenforced.
                                 -- FIXME: Needs creation
   , pageTags      :: [String]   -- FIXME: Needs validation; perhaps on source reload or admin view?
-  , pageContent   :: Text       -- This might be a memory problem later.
   }
   deriving (Eq, Ord, Read, Show, Data, Typeable)
 $(deriveSafeCopy 0 'base ''Page)
@@ -195,6 +197,7 @@ instance Indexable Page where
               , ixFun $ (:[]) . pageSlug
               , ixFun $ (:[]) . pageSourceId
               , ixFun $ (:[]) . pageUserId
+              , ixFun $ (:[]) . pageURL
               ]
 
 
@@ -315,10 +318,18 @@ getPage pid = getOne . getEQ pid . pages <$> ask
 getPagesBySourceId :: SourceId -> Query CtrlVState [Page]
 getPagesBySourceId sid = IxSet.toList . getEQ sid . pages <$> ask
 
+getPagesBySourceIds :: [SourceId] -> Query CtrlVState [Page]
+getPagesBySourceIds sids = do
+  cstate <- ask
+  return $ IxSet.toList $ (pages cstate) IxSet.@+ sids
+
 getPageBySourceIdsAndSlug :: [SourceId] -> PageSlug -> Query CtrlVState (Maybe Page)
 getPageBySourceIdsAndSlug sids slug = do
   cstate <- ask
   return $ getOne $ (pages cstate) IxSet.@+ sids IxSet.@= slug
+
+getPageBySourceIdAndSlugAndURL :: SourceId -> PageSlug -> MyURL -> Query CtrlVState (Maybe Page)
+getPageBySourceIdAndSlugAndURL sid slug url = getOne . getEQ url . getEQ slug . getEQ sid . pages <$> ask
 
 getPagesByUserId :: UserId -> Query CtrlVState [Page]
 getPagesByUserId userid = IxSet.toList . getEQ userid . pages <$> ask
@@ -364,9 +375,11 @@ $(makeAcidic ''CtrlVState
    , 'deleteSource
    , 'getPage
    , 'getPagesBySourceId
+   , 'getPagesBySourceIds
    , 'getPagesByUserId
    , 'getPagesBySlug
    , 'getPageBySourceIdsAndSlug 
+   , 'getPageBySourceIdAndSlugAndURL
    , 'incrementPageId
    , 'updatePage
    , 'deletePage
@@ -388,7 +401,6 @@ data Route
     | AdminEditSource SourceId
     | AdminDeletePath PathId
     | AdminDeleteSource SourceId
-    | AdminRefreshSource SourceId
     | ViewPage PathHost PathSlug PageSlug
     | CSS
     | U_AuthProfile AuthProfileURL
@@ -415,7 +427,6 @@ route acid@Acid{..} baseURL url =
       (AdminEditSource sid)              -> adminEditSource acid sid
       (AdminDeletePath pid)              -> adminDeletePath acid pid
       (AdminDeleteSource sid)            -> adminDeleteSource acid sid
-      (AdminRefreshSource sid)           -> adminRefreshSource acid sid
       (ViewPage phost pathSlug pageSlug) -> viewPage acid phost pathSlug pageSlug
       CSS                                -> serveFile (asContentType "text/css") "style.css"
       -- FIXME: replace the AdminViewAll thing here with "go back to
@@ -597,6 +608,11 @@ instance EmbedAsChild CtrlV' UTCTime where
 -- Pages
 ------------------------------------------------------------------------------
 
+
+trimWS      :: String -> String
+trimWS      = f . f
+   where f = reverse . dropWhile Data.Char.isSpace
+
 ifLoggedIn :: (Happstack m) => Acid -> m a -> (UserId -> m a) -> m a
 ifLoggedIn Acid{..} no yes = do
   mUserId <- getUserId acidAuth acidProfile
@@ -655,7 +671,7 @@ sourceBody Source{..} =
   , <div class="source-body-refreshed"><% sourceRefreshed       %></div>
   , <div class="source-body-added"><% sourceAdded %></div>
   , <div class="source-body-view"><a href=(AdminViewSource sourceId)>View</a></div>
-  , <div class="source-body-edit"><a href=(AdminRefreshSource sourceId)>Refresh</a></div>
+  , <div class="source-body-edit"><a href=(AdminViewSource sourceId)>Refresh</a></div>
   , <div class="source-body-edit"><a href=(AdminEditSource sourceId)>Edit</a></div>
   , <div class="source-body-delete"><a href=(AdminDeleteSource sourceId)>Delete</a></div>
   ]
@@ -681,7 +697,7 @@ pageBody Page{..} =
   , <div class="page-body-format"><% pageFormat       %></div>
   , <div class="page-body-tags"><% pageTags       %></div>
   , <div class="page-body-view"><a href=(AdminViewPage pageId)>View</a></div>
-  , <div class="page-body-refresh"><a href=(AdminRefreshSource pageSourceId)>Refresh</a></div>
+  , <div class="page-body-refresh"><a href=(AdminViewSource pageSourceId)>Refresh</a></div>
   ]
 
 makeTable :: GenXML CtrlV' -> [GenXML CtrlV'] -> [a] -> (a -> [GenXML CtrlV']) -> GenXML CtrlV'
@@ -769,13 +785,64 @@ adminViewPath acid pid = do
       (\ipath -> <p>Path <% pathSlug ipath %>/<% pid %> is not owned by you.</p>)
       (\ipath -> do
         sources <- query (GetSources $ pathSources ipath)
+        pages <- query (GetPagesBySourceIds (map sourceId sources))
+        let collisions = getPageCollisions pages
         <div>
           <h1>Path</h1>
           <% makeDL pathHeader ipath pathBody %>
           <h1>Path's Sources</h1>
           <% makeTable (<p>There are no sources associated with this path.</p>) sourceHeader sources sourceBody %>
+          <% if collisions == [] then
+                <% () %>
+              else <%
+                <div>
+                  <h1>Page Collisions</h1>
+                  <p>FIXME: explain</p>
+                  <dl>
+                  <% map presentPageCollisions collisions %>
+                  </dl>
+                </div>
+              %>
+             %>
         </div>
         )
+
+presentPageCollisions :: (PageSlug, [MyURL]) -> GenXML CtrlV'
+presentPageCollisions (slug, urls) =
+  <div class="collision">
+    <dt><% slug %></dt>
+    <dd>
+      <ul>
+        <% mapM urlStuff urls %>
+      </ul>
+    </dd>
+  </div>
+
+  where
+    urlStuff url = <li><% url %></li>
+
+
+getPageCollisions :: [Page] -> [(PageSlug, [MyURL])]
+getPageCollisions pages =
+  -- NOTE: Very inefficient.  Unlikely to matter, though, in
+  -- practice.
+  --
+  -- Walk the list and for each page slug, walk the list *again*
+  -- finding all identical ones' URLs, then throw away the
+  -- singletons.
+  nub $ filter interesting $ map findMatching pages
+  where
+    -- List has at least 2 elements (plus [])
+    interesting :: (PageSlug, [MyURL]) -> Bool
+    interesting (a, (_:_:_)) = True
+    interesting _ = False
+
+    findMatching :: Page -> (PageSlug, [MyURL])
+    findMatching page = ((pageSlug page), map pageURL $ filter (sameSlug (pageSlug page)) pages)
+
+    sameSlug :: PageSlug -> Page -> Bool
+    sameSlug slug page = slug == (pageSlug page)
+
 
 -- FIXME: Needs to show pages
 adminViewSource :: Acid -> SourceId -> CtrlV Response
@@ -785,7 +852,40 @@ adminViewSource acid sid = do
     ifItemOK mSource sourceUserId uid
       (<p>Source id <% sid %> could not be found.</p>)
       (\isource -> <p>Source <% sourceURL isource %>/<% sid %> is not owned by you.</p>)
-      (\isource -> makeDL sourceHeader isource sourceBody)
+      (\isource -> do
+        _ <- refreshSource isource
+        pages <- query (GetPagesBySourceId sid)
+        let collisions = getPageCollisions pages
+        <div>
+          <h1>Source</h1>
+          <% makeDL sourceHeader isource sourceBody %>
+          <% if collisions == [] then
+                <% () %>
+              else <%
+                <div>
+                  <h1>Page Collisions</h1>
+                  <p>FIXME: explain</p>
+                  <dl>
+                  <% map presentPageCollisions collisions %>
+                  </dl>
+                </div>
+              %>
+          %>
+        </div>
+        )
+
+getURLContent :: MyURL -> CtrlV Text
+getURLContent url = do
+  urlContentRaw <- NHC.simpleHttp $ unMyURL $ url
+  return $ DTE.decodeUtf8 $ BS.concat $ LC.toChunks urlContentRaw 
+
+-- Note that we do not have to worry about escaping the txt
+-- value, that is done automatically by HSP.
+formatPage :: Format -> Text -> GenXML CtrlV'
+formatPage PlainText txt =
+    <pre>plain: <% txt %></pre>
+formatPage Pandoc txt =
+    <pre>pandoc: <% txt %></pre>
 
 
 adminViewPage :: Acid -> PageId -> CtrlV Response
@@ -796,11 +896,12 @@ adminViewPage acid pid = do
       (<p>Page id <% pid %> could not be found.</p>)
       (\ipage -> <p>Page <% pageSlug ipage %>/<% pid %> is not owned by you.</p>)
       (\ipage -> do
+        content <- getURLContent (pageURL ipage)
         <div>
           <h1>Path</h1>
           <% makeDL pageHeader ipage pageBody %>
           <h1>Content</h1>
-          <% formatPage (pageFormat ipage) (pageContent ipage) %>
+          <% formatPage (pageFormat ipage) content %>
         </div>)
 
 
@@ -890,7 +991,7 @@ adminNewSource acid@Acid{..} = do
       success ssource = do
         oldsid <- update (IncrementSourceId)
         _ <- update (UpdateSource (ssource { sourceId = oldsid }))
-        seeOtherURL (AdminRefreshSource oldsid)
+        seeOtherURL (AdminViewSource oldsid)
 
 adminEditPath :: Acid -> PathId -> CtrlV Response
 adminEditPath acid@Acid{..} pid = do
@@ -922,19 +1023,23 @@ adminDeleteSource acid@Acid{..} sid = do
           _ <- update (DeleteSource sid)
           seeOtherURL AdminViewAll)
 
-adminRefreshSource :: Acid -> SourceId -> CtrlV Response
-adminRefreshSource acid@Acid{..} sid = do
-    ifLoggedIn acid (appTemplate acid "Refresh A Source" () $ <h1>You Are Not Logged In</h1>) $ \uid -> do
-      mSource <- query (GetSource sid)
-      ifItemOK mSource sourceUserId uid
-        (appTemplate acid "Refresh A Source" () $ <p>Source id <% sid %> could not be found.</p>)
-        (\isource -> appTemplate acid "Refresh A Source" () $ <p>Source <% sourceURL isource %>/<% sid %> is not owned by you.</p>)
-        (\isource -> do
-          case (sourceType isource) of
-            DropBoxIndex -> do
-              _ <- dropBoxIndexSourceToPages isource
-              seeOtherURL (AdminViewSource sid)
-            _ -> error "Can't refresh that type!")
+-- FIXME: make sure everything is coerced to lowercase
+pageContentsToMetadata :: Text -> Map.Map String String
+pageContentsToMetadata contents =
+  -- FIXME: holy shit
+  let title = Text.unpack $ head $ Text.words contents in
+    Map.insert "title" title Map.empty
+
+-- FIXME: unfinished
+makeSlug :: String -> String
+makeSlug input = input
+
+findTitle :: MyURL -> Map.Map String String -> String
+findTitle url metadata =
+  fromMaybe urlTitle $ Map.lookup "title" metadata
+  where
+    urlTitle = subRegexPR "^.*/([^./]+).*$" "\\1" $ unMyURL url
+
 
 sourceAndURLsToPages :: Source -> [MyURL] -> CtrlV [PageId]
 sourceAndURLsToPages Source{..} urls =
@@ -942,21 +1047,26 @@ sourceAndURLsToPages Source{..} urls =
   where
     doPage :: MyURL -> CtrlV PageId
     doPage url = do
-      urlContentRaw <- NHC.simpleHttp $ unMyURL url
-      let urlContent = DTE.decodeUtf8 $ BS.concat $ LC.toChunks urlContentRaw 
-      -- FIXME: holy shit
-      let slug = PageSlug $ Text.unpack $ head $ Text.words urlContent
+      urlContent <- getURLContent url
+
+      let metadata = pageContentsToMetadata urlContent
+
+      let title = findTitle url metadata
+
+      let slug = PageSlug $ makeSlug title
+
       let newpage = Page { pageId       = PageId 0
                          , pageSourceId = sourceId
                          , pageUserId   = sourceUserId
                          , pageURL      = url
-                         , pageTitle    = unPageSlug slug -- FIXME: temp
+                         , pageTitle    = title
                          , pageFormat   = sourceFormat
                          , pageSlug     = slug
-                         , pageTags     = [] -- FIXME: temp
-                         , pageContent  = urlContent
+                         , pageTags     = splitOn ", " $ fromMaybe "" $ Map.lookup "tags" metadata
                          }
-      mPage <- query (GetPageBySourceIdsAndSlug [sourceId] slug)
+
+      -- Distinguish on URL now so we can alarm on duplicates later
+      mPage <- query (GetPageBySourceIdAndSlugAndURL sourceId slug url)
       case mPage of
         Nothing -> do
           oldpid <- update (IncrementPageId)
@@ -989,22 +1099,26 @@ dropBoxIndexSourceToURLs Source{..} = do
                   HXT.>>> css "a" 
                   HXT.>>> HXT.getAttrValue "href"
   -- Debugging:
-  -- trace ("hrefs: " ++ (show $ ppDoc hrefs)) $ return $ map (\a -> MyURL (a ++ "?dl=1")) $ nub hrefs
+  trace ("hrefs: " ++ (show $ ppDoc $ nub hrefs)) $ return $ map (\a -> MyURL (a ++ "?dl=1")) $ nub hrefs
 
   -- "?dl=1" gives us the URL to download the raw text of the file
-  return $ map (\a -> MyURL (a ++ "?dl=1")) $ nub hrefs
+  -- return $ map (\a -> MyURL (a ++ "?dl=1")) $ nub hrefs
+
+refreshSource :: Source -> CtrlV [PageId]
+refreshSource isource = do
+  now <- liftIO getCurrentTime
+  pages <- rgetPages (sourceType isource)
+  _ <- update (UpdateSource (isource { sourceRefreshed = now }))
+  return pages
+
+  where
+    rgetPages :: SourceType -> CtrlV [PageId]
+    rgetPages DropBoxIndex = dropBoxIndexSourceToPages isource
+    rgetPages _ = error "Can't refresh that type!"
 
 -- | convert a content page to HTML. We currently only support
 -- 'PlainText', but eventually it might do syntax hightlighting,
 -- markdown, etc.
-
--- Note that we do not have to worry about escaping the txt
--- value, that is done automatically by HSP.
-formatPage :: Format -> Text -> GenXML CtrlV'
-formatPage PlainText txt =
-    <pre>plain: <% txt %></pre>
-formatPage Pandoc txt =
-    <pre>pandoc: <% txt %></pre>
 
 -- BEGIN dropbox stuff
 
@@ -1024,29 +1138,30 @@ urlToHXT pageUrl = do
   contents <- NHC.simpleHttp pageUrl
   return $ HXT.readString [HXT.withParseHTML HXT.yes, HXT.withWarnings HXT.no] (LC.unpack contents)
 
--- Takes a URL and returns a Just pair of the original and just the part between the last / and the extension, IFF the extension is .txt (otherwise Nothing)
-fullFilePair :: String -> Maybe (String, String)
-fullFilePair = [rex|^(?{ }.*/(?{ }[^/.]+)\.txt)$|]
-
--- Given a dropbox public URL, pull all the hrefs, turn them into
--- pairs of the URL and the file's basename
---
--- FIXME: note that the second bit here, which becomes the cfi_name,
--- is completely wrong; it should be extracted by parsing the file.
+-- -- Takes a URL and returns a Just pair of the original and just the part between the last / and the extension, IFF the extension is .txt (otherwise Nothing)
+-- fullFilePair :: String -> Maybe (String, String)
+-- fullFilePair = [rex|^(?{ }.*/(?{ }[^/.]+)\.txt)$|]
 -- 
--- FIXME: There's probably all *kinds* of error handling we're not
--- doing here; what does urlToHXT return on error?
-dropBoxPathList :: MyURL -> IO [(String, String)]
-dropBoxPathList pageUrl = do
-  page <- liftIO $ urlToHXT $ unMyURL pageUrl
-  -- Most of this next line is from
-  -- http://adit.io/posts/2012-03-10-building_a_concurrent_web_scraper_with_haskell.html
-  hrefs <- HXT.runX $ page
-                  HXT.>>> css "a" 
-                  HXT.>>> HXT.getAttrValue "href"
-  return $ nub $ catMaybes $ map fullFilePair hrefs
-
- -- FIXME: Put back
+-- 
+-- -- Given a dropbox public URL, pull all the hrefs, turn them into
+-- -- pairs of the URL and the file's basename
+-- --
+-- -- FIXME: note that the second bit here, which becomes the cfi_name,
+-- -- is completely wrong; it should be extracted by parsing the file.
+-- -- 
+-- -- FIXME: There's probably all *kinds* of error handling we're not
+-- -- doing here; what does urlToHXT return on error?
+-- dropBoxPathList :: MyURL -> IO [(String, String)]
+-- dropBoxPathList pageUrl = do
+--   page <- liftIO $ urlToHXT $ unMyURL pageUrl
+--   -- Most of this next line is from
+--   -- http://adit.io/posts/2012-03-10-building_a_concurrent_web_scraper_with_haskell.html
+--   hrefs <- HXT.runX $ page
+--                   HXT.>>> css "a" 
+--                   HXT.>>> HXT.getAttrValue "href"
+--   return $ nub $ catMaybes $ map fullFilePair hrefs
+-- 
+--  -- FIXME: Put back
  --
  -- -- | Given a component, pull the list page and cache the file
  -- -- information therefrom.
@@ -1145,6 +1260,8 @@ dropBoxPathList pageUrl = do
 
 viewPage :: Acid -> PathHost -> PathSlug -> PageSlug -> CtrlV Response
 viewPage acid@Acid{..} pathHost pathSlug pageSlug = do
+  -- FIXME: since we're retrieving the content *anyway*, let's
+  -- refresh whatever of the particular page's info that we can
                 appTemplate acid "unfinished" () $ <p>unfinished</p>
 
 -- END dropbox stuff

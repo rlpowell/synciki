@@ -29,5 +29,7 @@ Executable ControlV
                      , http-conduit
                      , hxt
                      , bytestring
-                     , rex
                      , pretty-show
+                     , containers
+                     , regexpr
+                     , split
