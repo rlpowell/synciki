@@ -632,7 +632,7 @@ pathHeader =
   , <div class="path-header-host">Host</div>
   , <div class="path-header-added">Date Added</div>
   , <div class="path-header-admin-view">Admin View</div>
-  , <div class="path-header-view">View</div>
+  , <div class="path-header-client-view">Client View</div>
   , <div class="path-header-edit">Edit</div>
   , <div class="path-header-delete">Delete</div>
   ]
@@ -643,7 +643,7 @@ pathBody Path{..} =
   , <div class="path-body-host"><% pathHost       %></div>
   , <div class="path-body-added"><% pathAdded %></div>
   , <div class="path-body-admin-view"><a href=(AdminViewPath pathId)>Admin View</a></div>
-  , <div class="path-body-view"><a href=(ViewPath pathHost pathSlug)>View</a></div>
+  , <div class="path-body-client-view"><a href=(ViewPath pathHost pathSlug)>Client View</a></div>
   , <div class="path-body-edit"><a href=(AdminEditPath pathId)>Edit</a></div>
   , <div class="path-body-delete"><a href=(AdminDeletePath pathId)>Delete</a></div>
   ]
@@ -668,7 +668,7 @@ sourceBody Source{..} =
   , <div class="source-body-format"><% sourceFormat       %></div>
   , <div class="source-body-refreshed"><% sourceRefreshed       %></div>
   , <div class="source-body-added"><% sourceAdded %></div>
-  , <div class="source-body-admin view"><a href=(AdminViewSource sourceId)>View</a></div>
+  , <div class="source-body-admin view"><a href=(AdminViewSource sourceId)>Admin View</a></div>
   , <div class="source-body-refresh"><a href=(AdminViewSource sourceId)>Refresh</a></div>
   , <div class="source-body-edit"><a href=(AdminEditSource sourceId)>Edit</a></div>
   , <div class="source-body-delete"><a href=(AdminDeleteSource sourceId)>Delete</a></div>
@@ -694,7 +694,7 @@ pageBody Page{..} =
   , <div class="page-body-title"><% pageTitle       %></div>
   , <div class="page-body-format"><% pageFormat       %></div>
   , <div class="page-body-tags"><% pageTags       %></div>
-  , <div class="page-body-admin-view"><a href=(AdminViewPage pageId)>View</a></div>
+  , <div class="page-body-admin-view"><a href=(AdminViewPage pageId)>Admin View</a></div>
   , <div class="page-body-refresh"><a href=(AdminViewSource pageSourceId)>Refresh</a></div>
   ]
 
@@ -707,7 +707,7 @@ pathPageHeader =
   , <div class="page-header-format">Format</div>
   , <div class="page-header-tags">Tags</div>
   , <div class="page-header-admin-view">Admin View</div>
-  , <div class="page-header-view">View</div>
+  , <div class="page-header-client-view">Client View</div>
   , <div class="page-header-refresh">Refresh</div>
   ]
 
@@ -719,8 +719,8 @@ pathPageBody Path{..} Page{..} =
   , <div class="page-body-title"><% pageTitle       %></div>
   , <div class="page-body-format"><% pageFormat       %></div>
   , <div class="page-body-tags"><% pageTags       %></div>
-  , <div class="page-body-admin-view"><a href=(AdminViewPage pageId)>View</a></div>
-  , <div class="page-body-view"><a href=(ViewPage pathHost pathSlug pageSlug)>View</a></div>
+  , <div class="page-body-admin-view"><a href=(AdminViewPage pageId)>Admin View</a></div>
+  , <div class="page-body-client-view"><a href=(ViewPage pathHost pathSlug pageSlug)>Client View</a></div>
   , <div class="page-body-refresh"><a href=(AdminViewSource pageSourceId)>Refresh</a></div>
   ]
 
@@ -1064,7 +1064,7 @@ pageContentsToMetadata contents =
     Map.insert "title" title Map.empty
 
 makeSlug :: String -> String
-makeSlug input = gsubRegexPR "^-|-$" "" $ gsubRegexPR "[^a-z0-9-]" "-" $ map Data.Char.toLower input
+makeSlug input = gsubRegexPR "^-|-$" "" $ gsubRegexPR "[^-a-z0-9]" "-" $ map Data.Char.toLower input
 
 findTitle :: MyURL -> Map.Map String String -> String
 findTitle url metadata =
