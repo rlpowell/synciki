@@ -13,7 +13,6 @@ import Data.Maybe
 import HSP
 import qualified Data.Map as Map
 import Data.Char
-import Data.List.Split
 
 -- If we start doing complicated URL manipulation, this would be
 -- valuable, but I think String (or re-branded String) is fine for now.
@@ -402,6 +401,7 @@ data Route
     | AdminDeletePath PathId
     | AdminDeleteSource SourceId
     | ViewPage PathHost PathSlug PageSlug
+    | ViewPath PathHost PathSlug
     | CSS
     | U_AuthProfile AuthProfileURL
       deriving (Eq, Ord, Read, Show, Data, Typeable)
@@ -428,6 +428,7 @@ route acid@Acid{..} baseURL url =
       (AdminDeletePath pid)              -> adminDeletePath acid pid
       (AdminDeleteSource sid)            -> adminDeleteSource acid sid
       (ViewPage phost pathSlug pageSlug) -> viewPage acid phost pathSlug pageSlug
+      (ViewPath phost pathSlug)          -> viewPath acid phost pathSlug
       CSS                                -> serveFile (asContentType "text/css") "style.css"
       -- FIXME: replace the AdminViewAll thing here with "go back to
       -- the last page we were on". - rlpowell
@@ -608,11 +609,6 @@ instance EmbedAsChild CtrlV' UTCTime where
 -- Pages
 ------------------------------------------------------------------------------
 
-
-trimWS      :: String -> String
-trimWS      = f . f
-   where f = reverse . dropWhile Data.Char.isSpace
-
 ifLoggedIn :: (Happstack m) => Acid -> m a -> (UserId -> m a) -> m a
 ifLoggedIn Acid{..} no yes = do
   mUserId <- getUserId acidAuth acidProfile
@@ -635,6 +631,7 @@ pathHeader =
   [ <div class="path-header-slug">Slug</div>
   , <div class="path-header-host">Host</div>
   , <div class="path-header-added">Date Added</div>
+  , <div class="path-header-admin-view">Admin View</div>
   , <div class="path-header-view">View</div>
   , <div class="path-header-edit">Edit</div>
   , <div class="path-header-delete">Delete</div>
@@ -645,7 +642,8 @@ pathBody Path{..} =
   [ <div class="path-body-slug"><% pathSlug       %></div>
   , <div class="path-body-host"><% pathHost       %></div>
   , <div class="path-body-added"><% pathAdded %></div>
-  , <div class="path-body-view"><a href=(AdminViewPath pathId)>View</a></div>
+  , <div class="path-body-admin-view"><a href=(AdminViewPath pathId)>Admin View</a></div>
+  , <div class="path-body-view"><a href=(ViewPath pathHost pathSlug)>View</a></div>
   , <div class="path-body-edit"><a href=(AdminEditPath pathId)>Edit</a></div>
   , <div class="path-body-delete"><a href=(AdminDeletePath pathId)>Delete</a></div>
   ]
@@ -657,8 +655,8 @@ sourceHeader =
   , <div class="source-header-format">Format</div>
   , <div class="source-header-refreshed">Date Last Refreshed</div>
   , <div class="source-header-added">Date Added</div>
-  , <div class="source-header-view">View</div>
-  , <div class="source-header-view">Refresh</div>
+  , <div class="source-header-view">Admin View</div>
+  , <div class="source-header-refresh">Refresh</div>
   , <div class="source-header-edit">Edit</div>
   , <div class="source-header-delete">Delete</div>
   ]
@@ -670,8 +668,8 @@ sourceBody Source{..} =
   , <div class="source-body-format"><% sourceFormat       %></div>
   , <div class="source-body-refreshed"><% sourceRefreshed       %></div>
   , <div class="source-body-added"><% sourceAdded %></div>
-  , <div class="source-body-view"><a href=(AdminViewSource sourceId)>View</a></div>
-  , <div class="source-body-edit"><a href=(AdminViewSource sourceId)>Refresh</a></div>
+  , <div class="source-body-admin view"><a href=(AdminViewSource sourceId)>View</a></div>
+  , <div class="source-body-refresh"><a href=(AdminViewSource sourceId)>Refresh</a></div>
   , <div class="source-body-edit"><a href=(AdminEditSource sourceId)>Edit</a></div>
   , <div class="source-body-delete"><a href=(AdminDeleteSource sourceId)>Delete</a></div>
   ]
@@ -684,7 +682,7 @@ pageHeader =
   , <div class="page-header-title">Title</div>
   , <div class="page-header-format">Format</div>
   , <div class="page-header-tags">Tags</div>
-  , <div class="page-header-view">View</div>
+  , <div class="page-header-admin-view">Admin View</div>
   , <div class="page-header-refresh">Refresh</div>
   ]
 
@@ -696,7 +694,33 @@ pageBody Page{..} =
   , <div class="page-body-title"><% pageTitle       %></div>
   , <div class="page-body-format"><% pageFormat       %></div>
   , <div class="page-body-tags"><% pageTags       %></div>
-  , <div class="page-body-view"><a href=(AdminViewPage pageId)>View</a></div>
+  , <div class="page-body-admin-view"><a href=(AdminViewPage pageId)>View</a></div>
+  , <div class="page-body-refresh"><a href=(AdminViewSource pageSourceId)>Refresh</a></div>
+  ]
+
+pathPageHeader :: [GenXML CtrlV']
+pathPageHeader =
+  [ <div class="page-header-url">URL</div>
+  , <div class="page-header-source">Source</div>
+  , <div class="page-header-slug">Slug</div>
+  , <div class="page-header-title">Title</div>
+  , <div class="page-header-format">Format</div>
+  , <div class="page-header-tags">Tags</div>
+  , <div class="page-header-admin-view">Admin View</div>
+  , <div class="page-header-view">View</div>
+  , <div class="page-header-refresh">Refresh</div>
+  ]
+
+pathPageBody :: Path -> Page -> [GenXML CtrlV']
+pathPageBody Path{..} Page{..} =
+  [ <div class="page-body-url"><% pageURL       %></div>
+  , <div class="page-body-source"><a href=(AdminViewSource pageSourceId)>View Source</a></div>
+  , <div class="page-body-slug"><% pageSlug       %></div>
+  , <div class="page-body-title"><% pageTitle       %></div>
+  , <div class="page-body-format"><% pageFormat       %></div>
+  , <div class="page-body-tags"><% pageTags       %></div>
+  , <div class="page-body-admin-view"><a href=(AdminViewPage pageId)>View</a></div>
+  , <div class="page-body-view"><a href=(ViewPage pathHost pathSlug pageSlug)>View</a></div>
   , <div class="page-body-refresh"><a href=(AdminViewSource pageSourceId)>Refresh</a></div>
   ]
 
@@ -734,22 +758,28 @@ sourceTable acid = do
     sources <- query (GetSourcesByUserId uid)
     makeTable (<p>There are no sources yet.</p>) sourceHeader sources sourceBody
 
-pageTable :: Acid -> GenXML CtrlV'
-pageTable acid = do
+pageTable :: Acid -> [Page] -> GenXML CtrlV'
+pageTable acid pages = do
   ifLoggedIn acid (<p>You Are Not Logged In</p>) $ \uid -> do
-    pages <- query (GetPagesByUserId uid)
     makeTable (<p>There are no pages yet.</p>) pageHeader pages pageBody
+
+pathPageTable :: Acid -> Path -> GenXML CtrlV'
+pathPageTable acid mypath@Path{..} = do
+  ifLoggedIn acid (<p>You Are Not Logged In</p>) $ \_ -> do
+    pages <- query (GetPagesBySourceIds pathSources)
+    makeTable (<p>There are no pages yet.</p>) pathPageHeader pages (pathPageBody mypath)
 
 adminViewAll :: Acid -> CtrlV Response
 adminViewAll acid@Acid{..} = do
-  ifLoggedInResponse acid "View All" <h1>You Are Not Logged In</h1> $ \_ -> do
+  ifLoggedInResponse acid "View All" <h1>You Are Not Logged In</h1> $ \uid -> do
+    pages <- query (GetPagesByUserId uid)
     <div class="view-all-content">
       <h1>Your Paths</h1>
       <% pathTable acid %>
       <h1>Your Sources</h1>
       <% sourceTable acid %>
       <h1>Your Pages</h1>
-      <% pageTable acid %>
+      <% pageTable acid pages %>
     </div>
 
 makeDL :: [GenXML CtrlV'] -> a -> (a -> [GenXML CtrlV']) -> GenXML CtrlV'
@@ -775,7 +805,6 @@ ifItemOK mItem itemToUserId uid ifNotFound ifNotOwned ifOK =
           else
             (ifNotOwned item)
 
--- FIXME: Needs to show pages
 adminViewPath :: Acid -> PathId -> CtrlV Response
 adminViewPath acid pid = do
   ifLoggedInResponse acid "View Path" <h1>You Are Not Logged In</h1> $ \uid -> do
@@ -804,6 +833,8 @@ adminViewPath acid pid = do
                 </div>
               %>
              %>
+          <h1>Path's Pages</h1>
+          <% pathPageTable acid ipath %>
         </div>
         )
 
@@ -871,6 +902,8 @@ adminViewSource acid sid = do
                 </div>
               %>
           %>
+          <h1>Source's Pages</h1>
+          <% pageTable acid pages %>
         </div>
         )
 
@@ -1030,9 +1063,8 @@ pageContentsToMetadata contents =
   let title = Text.unpack $ head $ Text.words contents in
     Map.insert "title" title Map.empty
 
--- FIXME: unfinished
 makeSlug :: String -> String
-makeSlug input = input
+makeSlug input = gsubRegexPR "^-|-$" "" $ gsubRegexPR "[^a-z0-9-]" "-" $ map Data.Char.toLower input
 
 findTitle :: MyURL -> Map.Map String String -> String
 findTitle url metadata =
@@ -1040,6 +1072,9 @@ findTitle url metadata =
   where
     urlTitle = subRegexPR "^.*/([^./]+).*$" "\\1" $ unMyURL url
 
+makeTags :: Format -> String -> [String]
+makeTags PlainText input = [""]
+makeTags Pandoc input = splitRegexPR "\\s*,\\s*" input
 
 sourceAndURLsToPages :: Source -> [MyURL] -> CtrlV [PageId]
 sourceAndURLsToPages Source{..} urls =
@@ -1062,7 +1097,7 @@ sourceAndURLsToPages Source{..} urls =
                          , pageTitle    = title
                          , pageFormat   = sourceFormat
                          , pageSlug     = slug
-                         , pageTags     = splitOn ", " $ fromMaybe "" $ Map.lookup "tags" metadata
+                         , pageTags     = makeTags sourceFormat $ fromMaybe "" $ Map.lookup "tags" metadata
                          }
 
       -- Distinguish on URL now so we can alarm on duplicates later
@@ -1262,6 +1297,10 @@ viewPage :: Acid -> PathHost -> PathSlug -> PageSlug -> CtrlV Response
 viewPage acid@Acid{..} pathHost pathSlug pageSlug = do
   -- FIXME: since we're retrieving the content *anyway*, let's
   -- refresh whatever of the particular page's info that we can
+                appTemplate acid "unfinished" () $ <p>unfinished</p>
+
+viewPath :: Acid -> PathHost -> PathSlug -> CtrlV Response
+viewPath acid@Acid{..} pathHost pathSlug = do
                 appTemplate acid "unfinished" () $ <p>unfinished</p>
 
 -- END dropbox stuff

@@ -32,4 +32,3 @@ Executable ControlV
                      , pretty-show
                      , containers
                      , regexpr
-                     , split
