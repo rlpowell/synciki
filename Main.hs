@@ -1297,7 +1297,22 @@ viewPage :: Acid -> PathHost -> PathSlug -> PageSlug -> CtrlV Response
 viewPage acid@Acid{..} pathHost pathSlug pageSlug = do
   -- FIXME: since we're retrieving the content *anyway*, let's
   -- refresh whatever of the particular page's info that we can
-                appTemplate acid "unfinished" () $ <p>unfinished</p>
+  mPath <- query (GetPathByHostAndSlug pathHost pathSlug)
+  case mPath of
+    Nothing -> do
+      appTemplate acid "Page Not Found" () $ <p>Page Not Found</p>
+    (Just Path{..}) -> do
+      mPage <- query (GetPageBySourceIdsAndSlug pathSources pageSlug)
+      case mPage of
+        Nothing -> do
+          appTemplate acid "Page Not Found" () $ <p>Page Not Found</p>
+        (Just myPage) -> do
+          -- FIXME: needs title
+          content <- getURLContent (pageURL myPage)
+          appTemplate acid "The Page" () $ <% formatPage (pageFormat myPage) content %>
+
+
+
 
 viewPath :: Acid -> PathHost -> PathSlug -> CtrlV Response
 viewPath acid@Acid{..} pathHost pathSlug = do
