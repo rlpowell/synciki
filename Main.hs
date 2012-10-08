@@ -693,7 +693,7 @@ pageBody Page{..} =
   , <div class="page-body-slug"><% pageSlug       %></div>
   , <div class="page-body-title"><% pageTitle       %></div>
   , <div class="page-body-format"><% pageFormat       %></div>
-  , <div class="page-body-tags"><% pageTags       %></div>
+  , <div class="page-body-tags"><% intercalate ", " pageTags       %></div>
   , <div class="page-body-admin-view"><a href=(AdminViewPage pageId)>Admin View</a></div>
   , <div class="page-body-refresh"><a href=(AdminViewSource pageSourceId)>Refresh</a></div>
   ]
@@ -914,11 +914,11 @@ getURLContent url = do
 
 -- Note that we do not have to worry about escaping the txt
 -- value, that is done automatically by HSP.
-formatPage :: Format -> Text -> GenXML CtrlV'
+formatPage :: Format -> [Text] -> GenXML CtrlV'
 formatPage PlainText txt =
-    <pre>plain: <% txt %></pre>
+    <pre>plain: <% Text.unlines txt %></pre>
 formatPage Pandoc txt =
-    <pre>pandoc: <% txt %></pre>
+    <pre>pandoc: <% Text.unlines txt %></pre>
 
 
 adminViewPage :: Acid -> PageId -> CtrlV Response
@@ -930,11 +930,12 @@ adminViewPage acid pid = do
       (\ipage -> <p>Page <% pageSlug ipage %>/<% pid %> is not owned by you.</p>)
       (\ipage -> do
         content <- getURLContent (pageURL ipage)
+        let (metadata, body) = pageContentsToMetadataAndBody content
         <div>
           <h1>Path</h1>
           <% makeDL pageHeader ipage pageBody %>
           <h1>Content</h1>
-          <% formatPage (pageFormat ipage) content %>
+          <% formatPage (pageFormat ipage) body %>
         </div>)
 
 
@@ -1057,11 +1058,30 @@ adminDeleteSource acid@Acid{..} sid = do
           seeOtherURL AdminViewAll)
 
 -- FIXME: make sure everything is coerced to lowercase
-pageContentsToMetadata :: Text -> Map.Map String String
-pageContentsToMetadata contents =
-  -- FIXME: holy shit
-  let title = Text.unpack $ head $ Text.words contents in
-    Map.insert "title" title Map.empty
+pageContentsToMetadataAndBody :: Text -> (Map.Map String String, [Text])
+pageContentsToMetadataAndBody contents =
+  let
+      -- Break into lines, get the ones at the beginning that start
+      -- with %
+      (header, body) = span (\txt -> ((Text.head txt) == '%')) 
+                        $ map (Text.filter ((/=) '\r')) 
+                        $ Text.lines contents
+      -- Join lines that start with % and spaces and don't have an
+      -- obvious header tag to the previous line
+      merger rest str = case (matchRegexPR "^%\\s\\s+([^:]+(\\s.*)?)$" $ Text.unpack str) of
+        Nothing -> rest ++ [Text.unpack str]
+        Just _ -> (init rest) ++ [(last rest) ++ " " ++ (subRegexPR "^%\\s\\s+([^:]+(\\s.*)?)$" "\\1" $ Text.unpack str)]
+      merged = foldl merger [] $ trace ("header: " ++ (show header)) header
+      -- Get only those lines that look like metadata
+      metadata = takeWhile (\x -> isJust $ matchRegexPR "^%\\s*[-a-zA-Z0-9]+:\\s+" x) $ trace ("merged: " ++ (show merged)) merged 
+      -- Split them into name/value pairs
+      splitter str = (makeSlug $ subRegexPR "^%\\s*([-a-zA-Z0-9]+):\\s.*" "\\1" str,
+                        subRegexPR "^%\\s*[-a-zA-Z0-9]+:\\s+" "" str)
+      splitted = map splitter $ trace ("metadata: " ++ (show metadata)) metadata 
+      -- Turn the pairs into Maps.
+      final = Map.unions $ map (\x -> Map.insert (fst x) (snd x) Map.empty) $ trace ("splitted: " ++ (show splitted)) splitted 
+  in
+    (final, body)
 
 makeSlug :: String -> String
 makeSlug input = gsubRegexPR "^-|-$" "" $ gsubRegexPR "[^-a-z0-9]" "-" $ map Data.Char.toLower input
@@ -1084,7 +1104,7 @@ sourceAndURLsToPages Source{..} urls =
     doPage url = do
       urlContent <- getURLContent url
 
-      let metadata = pageContentsToMetadata urlContent
+      let (metadata, body) = pageContentsToMetadataAndBody urlContent
 
       let title = findTitle url metadata
 
@@ -1140,9 +1160,13 @@ dropBoxIndexSourceToURLs Source{..} = do
   -- return $ map (\a -> MyURL (a ++ "?dl=1")) $ nub hrefs
 
 refreshSource :: Source -> CtrlV [PageId]
-refreshSource isource = do
+refreshSource isource@Source{..} = do
   now <- liftIO getCurrentTime
-  pages <- rgetPages (sourceType isource)
+  -- Delete the current list of pages so we don't end up with lies
+  -- about pages that are now removed
+  oldpages <- query (GetPagesBySourceId sourceId)
+  _ <- mapM (\p -> update (DeletePage (pageId p))) oldpages
+  pages <- rgetPages sourceType
   _ <- update (UpdateSource (isource { sourceRefreshed = now }))
   return pages
 
@@ -1320,7 +1344,8 @@ viewPage acid@Acid{..} myPathHost myPathSlug myPageSlug = do
         (Just myPage) -> do
           -- FIXME: needs title
           content <- getURLContent (pageURL myPage)
-          appTemplate acid "The Page" () $ <% formatPage (pageFormat myPage) content %>
+          let (metadata, body) = pageContentsToMetadataAndBody content
+          appTemplate acid "The Page" () $ <% formatPage (pageFormat myPage) body %>
 
 
 
