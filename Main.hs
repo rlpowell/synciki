@@ -1294,18 +1294,29 @@ urlToHXT pageUrl = do
 -- 
 
 viewPage :: Acid -> PathHost -> PathSlug -> PageSlug -> CtrlV Response
-viewPage acid@Acid{..} pathHost pathSlug pageSlug = do
+viewPage acid@Acid{..} myPathHost myPathSlug myPageSlug = do
   -- FIXME: since we're retrieving the content *anyway*, let's
   -- refresh whatever of the particular page's info that we can
-  mPath <- query (GetPathByHostAndSlug pathHost pathSlug)
+  mPath <- query (GetPathByHostAndSlug myPathHost myPathSlug)
   case mPath of
     Nothing -> do
-      appTemplate acid "Page Not Found" () $ <p>Page Not Found</p>
+      appTemplate acid "Page Not Found" () $ <div>
+        <p>Page Not Found, no such path</p>
+        <p><% (show myPathHost ) %></p>
+        <p><% (show myPathSlug ) %></p>
+        </div>
     (Just Path{..}) -> do
-      mPage <- query (GetPageBySourceIdsAndSlug pathSources pageSlug)
+      mPage <- query (GetPageBySourceIdsAndSlug pathSources myPageSlug)
       case mPage of
         Nothing -> do
-          appTemplate acid "Page Not Found" () $ <p>Page Not Found</p>
+  -- trace ("hrefs: " ++ (show $ ppDoc $ nub hrefs)) $ return $ map (\a -> MyURL (a ++ "?dl=1")) $ nub hrefs
+          testPages <- query (GetPagesBySourceIds pathSources)
+          appTemplate acid "Page Not Found" () $ <div>
+            <p>Page Not Found, no such page</p>
+            <p><% (show pathSources ) %></p>
+            <p><% (show myPageSlug ) %></p>
+            <p><% (show (map pageSlug testPages) ) %></p>
+            </div>
         (Just myPage) -> do
           -- FIXME: needs title
           content <- getURLContent (pageURL myPage)
