@@ -718,7 +718,7 @@ pathPageBody Path{..} Page{..} =
   , <div class="page-body-slug"><% pageSlug       %></div>
   , <div class="page-body-title"><% pageTitle       %></div>
   , <div class="page-body-format"><% pageFormat       %></div>
-  , <div class="page-body-tags"><% pageTags       %></div>
+  , <div class="page-body-tags"><% intercalate ", " pageTags       %></div>
   , <div class="page-body-admin-view"><a href=(AdminViewPage pageId)>Admin View</a></div>
   , <div class="page-body-client-view"><a href=(ViewPage pathHost pathSlug pageSlug)>Client View</a></div>
   , <div class="page-body-refresh"><a href=(AdminViewSource pageSourceId)>Refresh</a></div>
