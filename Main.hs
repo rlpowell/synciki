@@ -1399,11 +1399,14 @@ main :: IO ()
 main =  withAcid Nothing $ \acid ->
         do
            simpleApp id
-              Conf { port      = 8080
-                   , validator  = Nothing
-                   , logAccess = Just logMAccess
-                   , timeout = 30
-                   }
+              defaultConf {
+                httpConf = nullConf {
+                      port      = 8080
+                    , validator  = Nothing
+                    , logAccess = Just logMAccess
+                    , timeout = 30
+                }
+              }
               (AcidLocal Nothing initialCtrlVState)
               ()
               AdminViewAll

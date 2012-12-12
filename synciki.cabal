@@ -15,7 +15,7 @@ Data-files:
 Executable ControlV
   Main-Is:           Main.hs
   Build-Depends:     base < 5
-                     , happstack-foundation == 0.1.*
+                     , happstack-foundation
                      , happstack-authenticate
                      , ixset
                      , time
@@ -26,7 +26,7 @@ Executable ControlV
                      , happstack-hsp
                      , filepath
                      , acid-state
-                     , http-conduit
+                     , http-conduit == 1.6.*
                      , hxt
                      , bytestring
                      , pretty-show
