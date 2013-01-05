@@ -1,5 +1,5 @@
 {-# LANGUAGE DeriveDataTypeable, FlexibleContexts, FlexibleInstances, GeneralizedNewtypeDeriving, MultiParamTypeClasses, OverloadedStrings, RecordWildCards, TemplateHaskell, TypeFamilies, TypeSynonymInstances, OverloadedStrings #-}
-{-# OPTIONS_GHC -F -pgmFtrhsx #-}
+{-# OPTIONS_GHC -F -pgmFtrhsx -cpp -pgmPcpphs -optP--cpp -optP--hashes #-}
 module Main where
 
 import Happstack.Foundation
@@ -25,6 +25,7 @@ import Happstack.Auth.Core.Auth
 import Happstack.Auth.Core.Profile
 import Control.Exception           (bracket)
 import Data.Acid.Local             (createCheckpointAndClose)
+import Data.Acid.Advanced          (query')
 import System.FilePath             ((</>))
 
 -- Added for Blaze under Auth
@@ -45,7 +46,28 @@ import Data.List
 -- Debugging
 import Text.Show.Pretty
 import Debug.Trace
--- import Debug.Trace.Helpers
+
+-- | Whether the package was built with debugging settings.
+debugMode :: Bool
+#ifdef SYNCIKI_DEBUG
+debugMode = True
+#else
+debugMode = False
+#endif
+
+debugTrace :: String -> a -> a
+debugTrace str stuff =
+  if debugMode then
+    trace str stuff
+  else
+    stuff
+
+debugTraceSelfShow :: (Show a) => String -> a -> a
+debugTraceSelfShow str stuff =
+  if debugMode then
+    trace (str ++ (show stuff)) stuff
+  else
+    stuff
 
 ------------------------------------------------------------------------------
 -- Model
@@ -531,9 +553,8 @@ baseAppTemplate Acid{..} ttl moreHdrs bdy =
       </ul>
       <% do
         mUserId <- getUserId acidAuth acidProfile
-        -- Debugging
-        -- authState <- query' acidAuth AskAuthState
-        -- let authDump = traceMsg "authState: " $ ppDoc authState
+        authState <- query' acidAuth AskAuthState
+        let authDump = debugTraceSelfShow "authState: " $ ppDoc authState
         case mUserId of
            Nothing -> do
              <ul class="auth">
@@ -1071,15 +1092,15 @@ pageContentsToMetadataAndBody contents =
       merger rest str = case (matchRegexPR "^%\\s\\s+([^:]+(\\s.*)?)$" $ Text.unpack str) of
         Nothing -> rest ++ [Text.unpack str]
         Just _ -> (init rest) ++ [(last rest) ++ " " ++ (subRegexPR "^%\\s\\s+([^:]+(\\s.*)?)$" "\\1" $ Text.unpack str)]
-      merged = foldl merger [] $ trace ("header: " ++ (show header)) header
+      merged = foldl merger [] $ debugTraceSelfShow "header: " header
       -- Get only those lines that look like metadata
-      metadata = takeWhile (\x -> isJust $ matchRegexPR "^%\\s*[-a-zA-Z0-9]+:\\s+" x) $ trace ("merged: " ++ (show merged)) merged 
+      metadata = takeWhile (\x -> isJust $ matchRegexPR "^%\\s*[-a-zA-Z0-9]+:\\s+" x) $ trace "merged: " merged 
       -- Split them into name/value pairs
       splitter str = (makeSlug $ subRegexPR "^%\\s*([-a-zA-Z0-9]+):\\s.*" "\\1" str,
                         subRegexPR "^%\\s*[-a-zA-Z0-9]+:\\s+" "" str)
-      splitted = map splitter $ trace ("metadata: " ++ (show metadata)) metadata 
+      splitted = map splitter $ trace "metadata: " metadata 
       -- Turn the pairs into Maps.
-      final = Map.unions $ map (\x -> Map.insert (fst x) (snd x) Map.empty) $ trace ("splitted: " ++ (show splitted)) splitted 
+      final = Map.unions $ map (\x -> Map.insert (fst x) (snd x) Map.empty) $ trace "splitted: " splitted 
   in
     (final, body)
 
@@ -1154,7 +1175,7 @@ dropBoxIndexSourceToURLs Source{..} = do
                   HXT.>>> css "a" 
                   HXT.>>> HXT.getAttrValue "href"
   -- Debugging:
-  trace ("hrefs: " ++ (show $ ppDoc $ nub hrefs)) $ return $ map (\a -> MyURL (a ++ "?dl=1")) $ nub hrefs
+  debugTrace ("hrefs: " ++ (show $ ppDoc $ nub hrefs)) $ return $ map (\a -> MyURL (a ++ "?dl=1")) $ nub hrefs
 
   -- "?dl=1" gives us the URL to download the raw text of the file
   -- return $ map (\a -> MyURL (a ++ "?dl=1")) $ nub hrefs
@@ -1333,7 +1354,6 @@ viewPage acid@Acid{..} myPathHost myPathSlug myPageSlug = do
       mPage <- query (GetPageBySourceIdsAndSlug pathSources myPageSlug)
       case mPage of
         Nothing -> do
-  -- trace ("hrefs: " ++ (show $ ppDoc $ nub hrefs)) $ return $ map (\a -> MyURL (a ++ "?dl=1")) $ nub hrefs
           testPages <- query (GetPagesBySourceIds pathSources)
           appTemplate acid "Page Not Found" () $ <div>
             <p>Page Not Found, no such page</p>

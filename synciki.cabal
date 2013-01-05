@@ -12,6 +12,13 @@ cabal-version:       >=1.2
 Data-files:
         style.css
 
+flag debug
+  default: False
+  manual: True
+  description:
+    Enable settings for debugging.  Sets debugMode to true, which
+    affects debugTrace.
+
 Executable ControlV
   Main-Is:           Main.hs
   Build-Depends:     base < 5
@@ -32,3 +39,6 @@ Executable ControlV
                      , pretty-show
                      , containers
                      , regexpr
+
+  if flag(debug)
+    cpp-options: -DSYNCIKI_FLAG_DEBUG
